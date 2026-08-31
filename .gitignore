@@ -9,4 +9,7 @@ staticfiles/
 .DS_Store
 test_conn.py
 test_conn.py.bak
-graphify-out/
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/.graphify_python
+graphify-out/.graphify_root
