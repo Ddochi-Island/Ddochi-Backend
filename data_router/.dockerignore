@@ -1,0 +1,38 @@
+# Secrets — never include these in the image
+.env
+.env.*
+*.pem
+*.key
+**/cwallet.sso
+**/ewallet.p12
+**/*.jks
+**/ojdbc.properties
+
+# Wallet directory — mount via Cloud Run secret volumes at runtime
+../../wallet_v2/
+wallet_v2/
+
+# Build / runtime artifacts
+bin/
+data/
+*.exe
+*.test
+*.test.exe
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Git / CI metadata
+.git/
+.gitignore
+.github/
+
+# Documentation that doesn't belong in the image
+README.md
+SCHEMA_DELTA.sql
+deploy/
+run.ps1

@@ -1,0 +1,15 @@
+# Local secrets
+.env
+.env.local
+.env.*.local
+
+# Build output
+bin/
+*.exe
+
+# Block-storage runtime (mounted Block Volume in prod, local dir in dev)
+data/
+
+# Go test caches occasionally land here on Windows
+*.test
+*.test.exe

@@ -1,0 +1,41 @@
+# data_router 로컬 개발용 컨테이너. wallet 은 sqlnet.ora 가 절대경로를 하드코딩하므로
+# 호스트와 동일한 절대경로에 그대로 마운트한다 (재작성 불필요).
+services:
+  data_router:
+    build:
+      context: ./data_router
+      target: runtime
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: development
+      HTTP_ADDR: :8080
+      ORACLE_USER: ${DB_USER}
+      ORACLE_PASSWORD: ${DB_PASSWORD}
+      ORACLE_WALLET_DIR: ${TNS_ADMIN}
+      ORACLE_SERVICE_ALIAS: ${DB_NAME}
+      INTERNAL_API_TOKEN: ${DATA_ROUTER_TOKEN}
+      STORAGE_ENABLED: "0"
+    volumes:
+      - ${TNS_ADMIN}:${TNS_ADMIN}:ro
+
+  # 프로덕션 USERS 명단 일회성 마이그레이션 조회용. 읽기(SELECT)만 사용.
+  # 자격증명은 Ddochi/.env 에서 그때그때 export — 이 프로젝트의 .env 에는 넣지 않음.
+  data_router_prod:
+    build:
+      context: ./data_router
+      target: runtime
+    ports:
+      - "8081:8080"
+    environment:
+      NODE_ENV: development
+      HTTP_ADDR: :8080
+      ORACLE_USER: ${PROD_ORACLE_USER}
+      ORACLE_PASSWORD: ${PROD_ORACLE_PASSWORD}
+      ORACLE_WALLET_DIR: /wallet_prod
+      ORACLE_WALLET_PASSWORD: ${PROD_ORACLE_WALLET_PASSWORD}
+      ORACLE_SERVICE_ALIAS: ${PROD_ORACLE_SERVICE}
+      INTERNAL_API_TOKEN: ${DATA_ROUTER_TOKEN}
+      STORAGE_ENABLED: "0"
+    volumes:
+      - /Users/kimjaemin/Documents/workspace/project/Ddochi/wallet_v2:/wallet_prod:ro
