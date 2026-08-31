@@ -24,7 +24,7 @@ pip install -r requirements.txt
 DB_NAME=univdbdev_high
 DB_USER=ADMIN
 DB_PASSWORD=<wallet 계정 비밀번호>
-TNS_ADMIN=/절대/경로/Ddochi_dev/wallet
+TNS_ADMIN=/절대/경로/Ddochi-Backend/wallet
 
 DJANGO_SECRET_KEY=<임의의 긴 랜덤 문자열>
 DJANGO_DEBUG=True

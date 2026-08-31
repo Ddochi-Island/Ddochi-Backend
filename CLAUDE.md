@@ -78,3 +78,10 @@ When checking a boolean-ish flag from a `DataRouterClient.query()` row, compare 
 `AREA_ID` columns but drops the `REGIONS`/`TEAMS`/`AREAS` tables and their FKs entirely, since this
 dev DB doesn't model the full org hierarchy. Don't assume the dev schema matches production 1:1;
 check `sql/` before assuming a table/column exists.
+
+**Every stub view follows the same shape**: `@csrf_exempt` (these are token/header-authenticated
+API endpoints, not browser form posts — no Django session CSRF token exists to check), a
+`request.method` guard returning 405 for anything but the Express route's method, then
+`JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/<file>.js"}, status=501)`.
+Porting a route means replacing that last line with real logic while keeping the `@csrf_exempt` +
+method-guard shape — don't add Django's session auth or CSRF checking to a route Express didn't have it on.
