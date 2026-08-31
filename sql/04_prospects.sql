@@ -15,6 +15,17 @@
 -- PROSPECTS.NUMBER_STATUS/INTRODUCER_NAME/REGISTERED_AT/SHED_RESERVED_AT/
 -- TM_NOTE: Ddochi/sql/*.sql에 체크인된 마이그레이션이 없는 컬럼(스키마 드리프트).
 -- 위와 동일한 방법으로 prod USER_TAB_COLUMNS를 직접 조회해 타입을 확정.
+--
+-- SOURCE_TYPE CHECK: 체크인된 DDL은 ('manual','sheet','dolyo','tateam')이지만
+-- prod의 실제 CK_P_SOURCE 제약(및 실 데이터)은 'dupcheck'/'online'/'offline'도
+-- 허용 — prod 제약을 직접 조회해 그대로 반영.
+--
+-- PROSPECT_HISTORY.FIELD_KEY/BEFORE_VALUE/AFTER_VALUE/REF_ID,
+-- PROSPECT_HABJAEYANG.MBTI/JOB/ATT/DIST/ETC/GWACHEON_MIN/GWACHEON_TRANSFER/
+-- CENTER_MIN/CENTER_TRANSFER/SELF_IMAGE/CENTER_ENV/DRUG/MENTAL/FORMAT_VERSION:
+-- 체크인된 02_prospect.sql 이후 prod에 추가된 V1-lite 필드(전부 assets.js의
+-- submit-result/appendHistoryStmt가 실사용) — 마이그레이션 파일 없음, prod
+-- USER_TAB_COLUMNS 직접 조회로 확정.
 -- ================================================================
 
 CREATE TABLE PERSONAL_INFO (
@@ -67,7 +78,7 @@ CREATE TABLE PROSPECTS (
   STRATEGY_LINK       VARCHAR2(2000 CHAR),
   TOOL                VARCHAR2(100 CHAR),
   SOURCE_TYPE         VARCHAR2(10 CHAR)            NOT NULL
-                      CHECK (SOURCE_TYPE IN ('manual','sheet','dolyo','tateam')),
+                      CHECK (SOURCE_TYPE IN ('manual','sheet','tateam','dupcheck','dolyo','online','offline')),
   SHEET_CONFIG_ID     VARCHAR2(30 CHAR),
   SNAP_AREA_ID        VARCHAR2(30 CHAR),
   -- Shed 전용(스키마 드리프트, prod 실측 타입 그대로) — assets.js:2205-3071
@@ -113,6 +124,11 @@ CREATE TABLE PROSPECT_HISTORY (
   -- 호출 시점 AUTHOR.TEAM_ID/AREA_ID 스냅샷 — 트리거 아님, get_author_context()가 매번 채움
   SNAP_TEAM_ID       VARCHAR2(30 CHAR)            NOT NULL,
   SNAP_AREA_ID       VARCHAR2(30 CHAR)            NOT NULL,
+  -- appendHistoryStmt()의 extra 인자(구조화된 되돌리기 정보) — 안 넘기면 전부 NULL
+  FIELD_KEY          VARCHAR2(120 CHAR),
+  BEFORE_VALUE       CLOB,
+  AFTER_VALUE        CLOB,
+  REF_ID             VARCHAR2(160 CHAR),
   EVENT_AT           TIMESTAMP(6)                 DEFAULT LOCALTIMESTAMP NOT NULL,
   CONSTRAINT FK_PH_PROSPECT FOREIGN KEY (PROSPECT_ID)      REFERENCES PROSPECTS(PROSPECT_ID) ON DELETE CASCADE,
   CONSTRAINT FK_PH_AUTHOR   FOREIGN KEY (AUTHOR_SABUN)     REFERENCES USERS(SABUN),
@@ -163,6 +179,21 @@ CREATE TABLE PROSPECT_HABJAEYANG (
   HJ_MSG_ID        NUMBER(19),
   HJ_CHAT_ID       VARCHAR2(30 CHAR),
   HJ_SENT_AT       TIMESTAMP(6) WITH TIME ZONE,
+  -- V1-lite 필드 (FORMAT_VERSION=2 갱신 시 submit-result가 채움) — prod 실측
+  MBTI             VARCHAR2(10 CHAR),
+  JOB              VARCHAR2(500 CHAR),
+  ATT              VARCHAR2(500 CHAR),
+  DIST             VARCHAR2(500 CHAR),
+  ETC              VARCHAR2(2000 CHAR),
+  GWACHEON_MIN     NUMBER,
+  GWACHEON_TRANSFER NUMBER,
+  CENTER_MIN       NUMBER,
+  CENTER_TRANSFER  NUMBER,
+  SELF_IMAGE       VARCHAR2(12000 CHAR),
+  CENTER_ENV       CHAR(1)                      CHECK (CENTER_ENV IN ('O','X')),
+  DRUG             CHAR(1)                      CHECK (DRUG IN ('O','X')),
+  MENTAL           CHAR(1)                      CHECK (MENTAL IN ('O','X')),
+  FORMAT_VERSION   NUMBER                       DEFAULT 1,
   ACTIVE           NUMBER(1)                    DEFAULT 1 NOT NULL CHECK (ACTIVE IN (0,1)),
   CREATED_AT       TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
   UPDATED_AT       TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
