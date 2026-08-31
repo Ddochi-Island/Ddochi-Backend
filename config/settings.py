@@ -42,6 +42,19 @@ DATA_ROUTER_TIMEOUT_MS = config('DATA_ROUTER_TIMEOUT_MS', default=15000, cast=in
 # services/main 의 SHED_INTERNAL_KEY 와 동일한 값이어야 shed 쪽에서 붙일 수 있음.
 SHED_INTERNAL_KEY = config('SHED_INTERNAL_KEY', default='')
 
+# JWT 발급/검증 — services/main 의 config.js 와 동일한 env 이름.
+# ACCESS/REFRESH_TTL은 서버 기동 시 한 번만 읽힘 (AUTH_CONFIGS.ACCESS_TTL과
+# 달리 요청마다 다시 읽지 않음 — 원본 동작 그대로).
+JWT_SECRET = config('JWT_SECRET')
+JWT_ACCESS_TTL = config('JWT_ACCESS_TTL', default='15m')
+JWT_REFRESH_TTL = config('JWT_REFRESH_TTL', default='30d')
+
+# 사명의 길 비밀번호 (admin-unlock 라우트 포팅 전까지는 미사용).
+ADMIN_PASSWORD = config('ADMIN_PASSWORD', default='1440')
+
+# AUTH_CONFIGS / ROLES 조회 시 쓰는 지역 — prod 시드 데이터가 'college' 기준.
+REGION_ID = config('REGION_ID', default='college')
+
 # Application definition
 
 INSTALLED_APPS = [
