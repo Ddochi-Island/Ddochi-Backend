@@ -1,6 +1,18 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
+import json
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+
+from api.auth.gate import require_jwt
+from api.clients.data_router import DataRouterClient
+
+
+def _json_body(request):
+    try:
+        return json.loads(request.body or b'{}')
+    except (TypeError, ValueError):
+        return {}
 
 
 @csrf_exempt
@@ -172,19 +184,47 @@ def shed_note_save(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def get_tm_script(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /get-tm-script 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+    body = _json_body(request)
+    script_type = str(body.get('scriptType') or 'tm')
+    row = DataRouterClient().query_one(
+        'SELECT SCRIPT_MODE, SCRIPT_TEXT FROM USER_TM_SCRIPTS WHERE SABUN = :1 AND SCRIPT_TYPE = :2',
+        [request.user['sabun'], script_type],
+    )
+    if not row:
+        return JsonResponse({'success': True, 'mode': 'default', 'text': ''})
+    return JsonResponse({'success': True, 'mode': row.get('script_mode') or 'default', 'text': row.get('script_text') or ''})
 
 
 @csrf_exempt
+@require_jwt
 def save_tm_script(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /save-tm-script 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+    body = _json_body(request)
+    data = body.get('data') or {}
+    sabun = request.user['sabun']
+    script_type = str(data.get('scriptType') or 'tm')
+    mode = str(data.get('mode') or 'default')
+    text = str(data.get('text') or '')
+
+    # 원본은 MERGE 한 방(8개 distinct bind — go-ora MERGE 버그 패턴과는 다르지만,
+    # api/auth/passkey.py 의 set_hash()에서 이미 검증된 update-then-insert로 통일).
+    client = DataRouterClient()
+    affected = client.exec(
+        'UPDATE USER_TM_SCRIPTS SET SCRIPT_MODE = :1, SCRIPT_TEXT = :2, UPDATED_AT = SYSTIMESTAMP '
+        'WHERE SABUN = :3 AND SCRIPT_TYPE = :4',
+        [mode, text, sabun, script_type],
+    )
+    if not affected:
+        client.exec(
+            'INSERT INTO USER_TM_SCRIPTS (SABUN, SCRIPT_TYPE, SCRIPT_MODE, SCRIPT_TEXT) VALUES (:1, :2, :3, :4)',
+            [sabun, script_type, mode, text],
+        )
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
