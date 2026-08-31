@@ -1,10 +1,11 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
 import json
+import time
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from api.auth.gate import require_jwt
+from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient
 
 
@@ -13,6 +14,14 @@ def _json_body(request):
         return json.loads(request.body or b'{}')
     except (TypeError, ValueError):
         return {}
+
+
+# Shed 통화/접속 상태 — 원본처럼 DB 없이 프로세스 메모리 dict. 원본과 동일한 제약:
+# 단일 프로세스 전제(멀티 워커면 워커별로 안 나뉨) — 새로운 제약 아님.
+shed_call_state = {}
+shed_presence_state = {}
+_CALL_TTL_S = 60
+_PRESENCE_TTL_S = 12
 
 
 @csrf_exempt
@@ -144,35 +153,65 @@ def habjaeyang_dup_resolve(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def shed_call_status(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-call-status 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+    now = time.time()
+    body = _json_body(request)
+    calling_pid = str((body.get('data') or {}).get('callingProspectId') or '').strip().upper()
+    if calling_pid and calling_pid in shed_call_state:
+        shed_call_state[calling_pid]['lastHeartbeat'] = now
+    for pid in list(shed_call_state.keys()):
+        entry = shed_call_state[pid]
+        hb = entry.get('lastHeartbeat') or entry.get('startedAt') or 0
+        if now - hb > _CALL_TTL_S:
+            del shed_call_state[pid]
+
+    sabun = request.user.get('sabun')
+    if sabun:
+        shed_presence_state[sabun] = {'name': request.user.get('name'), 'lastHeartbeat': now}
+    for s in list(shed_presence_state.keys()):
+        if now - shed_presence_state[s]['lastHeartbeat'] > _PRESENCE_TTL_S:
+            del shed_presence_state[s]
+
+    return JsonResponse({'success': True, 'calls': shed_call_state, 'presence': shed_presence_state})
 
 
 @csrf_exempt
+@require_jwt
 def shed_presence_leave(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-presence-leave 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+    shed_presence_state.pop(request.user.get('sabun'), None)
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
+@require_jwt
 def shed_call_start(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-call-start 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+    body = _json_body(request)
+    prospect_id = str((body.get('data') or {}).get('prospectId') or '').strip().upper()
+    if not prospect_id:
+        return JsonResponse({'success': False, 'message': 'prospectId 필요'}, status=400)
+    ctx = get_author_context(request.user['sabun'])
+    shed_call_state[prospect_id] = {
+        'callerName': ctx['name'], 'callerSabun': ctx['sabun'], 'startedAt': time.time(),
+    }
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
+@require_jwt
 def shed_call_end(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-call-end 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+    body = _json_body(request)
+    prospect_id = str((body.get('data') or {}).get('prospectId') or '').strip().upper()
+    shed_call_state.pop(prospect_id, None)
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
