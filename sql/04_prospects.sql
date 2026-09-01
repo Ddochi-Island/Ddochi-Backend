@@ -146,9 +146,10 @@ CREATE TABLE PROSPECT_TM_LOGS (
   TM_PHASE          VARCHAR2(10 CHAR)            NOT NULL CHECK (TM_PHASE IN (
                       'attempt','progress','report','result'
                     )),
-  CATEGORY          VARCHAR2(20 CHAR)            NOT NULL CHECK (CATEGORY IN (
-                      'noAnswer','tmReserved','meetingFix','longTerm','bihap','rejected'
-                    )),
+  -- CATEGORY: prod에 값 제약(CHECK) 자체가 없음(NOT NULL만) — 실측 결과
+  -- welcomeMsg/noAnswerMsg 등 CHECK로 못 미리 알 수 없는 값이 이미 다수 존재.
+  -- 우리도 제약 없이 prod와 동일하게 자유 문자열로 둠.
+  CATEGORY          VARCHAR2(20 CHAR)            NOT NULL,
   CONTENT           CLOB,
   AUTHOR_SABUN      VARCHAR2(20 CHAR)            NOT NULL,
   BEFORE_TM_LOG_ID  NUMBER(19),
