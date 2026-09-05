@@ -13,11 +13,16 @@
 -- GOALS)는 회원 1명당 값 하나인 단순 속성이라 MEMBERS에 직접 추가.
 -- 감사컬럼(CREATED_AT 등)은 스펙엔 없지만 이 프로젝트의 기존 테이블 전체가
 -- 따르는 관례라 동일하게 유지.
+--
+-- POSITION_CODES.SCOPE: 스펙엔 없지만 기존 ROLES.SCOPE와 동일한 이유로 필요 —
+-- 한 회원이 여러 직책을 겸임할 때 로그인 응답에 보여줄 대표 직책 하나를
+-- global > region > team 우선순위로 고르는 데 씀(find_member_by_id 등에서 사용).
 -- ================================================================
 
 CREATE TABLE POSITION_CODES (
   POSITION_CODE   VARCHAR2(50 CHAR)            PRIMARY KEY,
   POSITION_NAME   VARCHAR2(50 CHAR)            NOT NULL,
+  SCOPE           VARCHAR2(10 CHAR)            NOT NULL CHECK (SCOPE IN ('region','team','global')),
   PERMISSIONS     CLOB                         NOT NULL,
   DESCRIPTION     VARCHAR2(255 CHAR),
   CREATED_AT      TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
@@ -29,6 +34,7 @@ CREATE TABLE POSITION_CODES (
 );
 
 COMMENT ON TABLE  POSITION_CODES             IS '직책 마스터. 기존 ROLES 대체';
+COMMENT ON COLUMN POSITION_CODES.SCOPE       IS 'global > region > team 순으로 대표 직책 선택 시 우선순위. 기존 ROLES.SCOPE 그대로';
 COMMENT ON COLUMN POSITION_CODES.PERMISSIONS IS 'JSON 배열. 예: ["admin","region_staff"]. 인가 판정의 실제 근거';
 
 CREATE TABLE MEMBERS (
