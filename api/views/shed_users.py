@@ -17,8 +17,8 @@ def shed_users(request, *args, **kwargs):
 
     try:
         rows = DataRouterClient().query(
-            """SELECT NAME, SABUN FROM USERS
-                WHERE DELETED_AT IS NULL AND STATUS = 'active' AND SABUN != 'SYSTEM'
+            """SELECT NAME, MEMBER_ID AS SABUN FROM MEMBERS
+                WHERE DELETED_AT IS NULL AND STATUS = 'ACTIVE' AND MEMBER_ID != 'SYSTEM'
                 ORDER BY NAME"""
         )
     except DataRouterError as e:

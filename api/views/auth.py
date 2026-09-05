@@ -10,30 +10,35 @@ from api.auth import passkey
 from api.clients.data_router import DataRouterClient, DataRouterError
 
 
-# ROLES.REGION_ID/TEAMS/AREAS 없는 dev 스키마용 조정 — team/area는 TEAM_ID/AREA_ID
-# 그대로 사용 (원본은 TEAMS/AREAS.DISPLAY_NAME으로 조인).
+# members 재설계 — USERS/ROLES를 MEMBERS/POSITION_CODES/MEMBER_POSITION_MAPPINGS/
+# MEMBER_AFFILIATION_HISTORIES로 대체. team/area는 MEMBER_AFFILIATION_HISTORIES의
+# IS_CURRENT=1 행에서 조회(현재 소속). ROLE_IDS(JSON 배열 컬럼) 대신
+# MEMBER_POSITION_MAPPINGS N:M 조인으로 직책을 조회.
 def find_user_by_sabun(sabun):
     if not sabun:
         return None
     return DataRouterClient().query_one(
-        """SELECT u.SABUN, u.NAME,
-                  u.TEAM_ID, u.TEAM_ID AS TEAM_NAME,
-                  u.AREA_ID, u.AREA_ID AS AREA_NAME,
-                  u.TELEGRAM_ID,
-                  (SELECT r.NAME FROM ROLES r
-                    WHERE r.DELETED_AT IS NULL
-                      AND INSTR(u.ROLE_IDS, '"' || r.ROLE_ID || '"') > 0
-                    ORDER BY CASE r.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
+        """SELECT m.MEMBER_ID AS SABUN, m.NAME,
+                  mah.REGION_CODE AS TEAM_ID, mah.REGION_CODE AS TEAM_NAME,
+                  mah.DISTRICT_CODE AS AREA_ID, mah.DISTRICT_CODE AS AREA_NAME,
+                  m.TELEGRAM_ID,
+                  (SELECT pc.POSITION_NAME
+                     FROM MEMBER_POSITION_MAPPINGS mpm
+                     JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+                    WHERE mpm.MEMBER_ID = m.MEMBER_ID AND pc.DELETED_AT IS NULL
+                    ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
                     FETCH FIRST 1 ROWS ONLY) AS POSITION,
                   (SELECT JSON_ARRAYAGG(jt.PERM RETURNING CLOB)
-                     FROM ROLES r,
-                          JSON_TABLE(r.PERMISSIONS, '$[*]' COLUMNS (PERM VARCHAR2(50 CHAR) PATH '$')) jt
-                    WHERE r.DELETED_AT IS NULL
-                      AND INSTR(u.ROLE_IDS, '"' || r.ROLE_ID || '"') > 0) AS PERMS,
-                  u.CREATED_AT AS JOINED_AT,
-                  u.DELETED_AT
-             FROM USERS u
-            WHERE u.SABUN = :1 AND u.DELETED_AT IS NULL""",
+                     FROM MEMBER_POSITION_MAPPINGS mpm
+                     JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE,
+                          JSON_TABLE(pc.PERMISSIONS, '$[*]' COLUMNS (PERM VARCHAR2(50 CHAR) PATH '$')) jt
+                    WHERE mpm.MEMBER_ID = m.MEMBER_ID AND pc.DELETED_AT IS NULL) AS PERMS,
+                  m.CREATED_AT AS JOINED_AT,
+                  m.DELETED_AT
+             FROM MEMBERS m
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+            WHERE m.MEMBER_ID = :1 AND m.DELETED_AT IS NULL""",
         [sabun],
         cache_ttl_ms=1_000,
         priority='high',
@@ -42,7 +47,7 @@ def find_user_by_sabun(sabun):
 
 def list_valid_names():
     try:
-        rows = DataRouterClient().query('SELECT NAME FROM USERS WHERE DELETED_AT IS NULL ORDER BY NAME')
+        rows = DataRouterClient().query('SELECT NAME FROM MEMBERS WHERE DELETED_AT IS NULL ORDER BY NAME')
     except DataRouterError:
         return []
     return [r['name'] for r in rows if r.get('name')]

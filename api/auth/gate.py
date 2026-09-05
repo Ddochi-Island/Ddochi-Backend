@@ -32,9 +32,14 @@ def require_jwt(view_func):
 
 
 def get_author_context(sabun):
-    """assets.js:681 getAuthorContext 포팅 — 없으면 sabun/'0'/'0' 폴백."""
+    """assets.js:681 getAuthorContext 포팅 — 없으면 sabun/'0'/'0' 폴백.
+    members 재설계 후: TEAM_ID/AREA_ID는 MEMBER_AFFILIATION_HISTORIES.IS_CURRENT=1 에서 조회."""
     u = DataRouterClient().query_one(
-        'SELECT NAME, TEAM_ID, AREA_ID FROM USERS WHERE SABUN = :1',
+        """SELECT m.NAME, mah.REGION_CODE AS TEAM_ID, mah.DISTRICT_CODE AS AREA_ID
+             FROM MEMBERS m
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+            WHERE m.MEMBER_ID = :1""",
         [sabun],
     )
     return {
