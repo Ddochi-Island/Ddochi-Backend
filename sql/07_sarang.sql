@@ -43,12 +43,14 @@ CREATE TABLE SARANG (
   PERSONAL_INFO_ID    VARCHAR2(64 CHAR)            NOT NULL,
   INFLOW_MEMBER_ID    VARCHAR2(50 CHAR)            NOT NULL,
   GUIDE_MEMBER_ID     VARCHAR2(50 CHAR),
+  TEAM_ID             VARCHAR2(30 CHAR)            NOT NULL,
   AGE                 NUMBER(3),
   MBTI                VARCHAR2(10 CHAR),
   STAGE               VARCHAR2(30 CHAR)            NOT NULL CHECK (STAGE IN (
                         '유입','티엠','만픽','합재양','재가','매칭','상따','성홀','성따','복방','센'
                       )),
   IS_DROPPED          NUMBER(1)                    DEFAULT 0 NOT NULL CHECK (IS_DROPPED IN (0,1)),
+  DROPPED_REASON      VARCHAR2(500 CHAR),
   APPROVAL_STATUS     VARCHAR2(15 CHAR)            CHECK (APPROVAL_STATUS IN ('대기','재가','반려','자동반려')),
   TM_STATUS           VARCHAR2(15 CHAR)            CHECK (TM_STATUS IN ('시작전','진행중','장기','예약','완료')),
   -- get-shed-prospects 등 실제 구현 중 발견한 shed 전용 필드(스펙 문서엔 없음) — 기존 PROSPECTS의
@@ -78,6 +80,7 @@ COMMENT ON COLUMN SARANG.APPROVAL_STATUS IS '재가 라이프사이클';
 COMMENT ON COLUMN SARANG.TM_STATUS     IS 'TM 진행도';
 COMMENT ON COLUMN SARANG.INFLOW_MEMBER_ID IS '최초 유입자(등록자) — 기존 PROSPECTS.MANAGER_SABUN 대응. 고정값, 재배정 안 됨';
 COMMENT ON COLUMN SARANG.GUIDE_MEMBER_ID  IS '담당 인도자 — 기존 PROSPECTS.GUIDE_SABUN 대응. INFLOW_MEMBER_ID와 달리 재배정·취소(NULL) 가능';
+COMMENT ON COLUMN SARANG.TEAM_ID          IS 'FK 없는 평문 팀 식별자(MEMBERS와 무관하게 별도 관리 — 리드 소속팀은 담당자 소속과 다를 수 있음)';
 COMMENT ON COLUMN SARANG.INTAKE_STATUS    IS '자동이관(webhook) 확인 상태. STAGE(진행 단계)와 별개 축 — 기존 PROSPECTS.NUMBER_STATUS 대응';
 COMMENT ON COLUMN SARANG.TM_NOTE          IS 'TM 메모 JSON {toggles:[], text:""} — 기존 PROSPECTS.TM_NOTE 대응';
 
@@ -86,6 +89,7 @@ CREATE TABLE SARANG_INFLOW_DETAILS (
   REGION_NAME      VARCHAR2(50 CHAR),
   REACTION         VARCHAR2(100 CHAR),
   LOCATION         VARCHAR2(100 CHAR),
+  INTRODUCER_NAME  VARCHAR2(100 CHAR),
   SOURCE_LINK      NUMBER(1)                    CHECK (SOURCE_LINK BETWEEN 1 AND 6),
   TM_RESERVED_AT   TIMESTAMP(6) WITH TIME ZONE,
   CONSTRAINT FK_SID_SARANG FOREIGN KEY (SARANG_ID) REFERENCES SARANG(SARANG_ID) ON DELETE CASCADE
