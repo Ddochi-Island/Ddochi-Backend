@@ -27,7 +27,7 @@ CREATE TABLE SARANG_INTAKE_QUEUE (
   REST_TYPE             VARCHAR2(50 CHAR),
   TM_RESERVED_AT        TIMESTAMP(6) WITH TIME ZONE,
   STATUS                VARCHAR2(15 CHAR)            DEFAULT 'pending' NOT NULL
-                        CHECK (STATUS IN ('pending','accepted','rejected')),
+                        CHECK (STATUS IN ('pending','submitted','accepted','rejected')),
   REVIEWED_BY_MEMBER_ID VARCHAR2(50 CHAR),
   REVIEWED_AT           TIMESTAMP(6) WITH TIME ZONE,
   CREATED_AT            TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
@@ -39,7 +39,7 @@ CREATE INDEX IX_SIQ_PHONE_STATUS ON SARANG_INTAKE_QUEUE (PHONE_NORMALIZED, STATU
 
 COMMENT ON TABLE  SARANG_INTAKE_QUEUE             IS 'shed 웹훅 자동이관 대기열 — 수락/반려 전 임시 보관. 수락 시에만 SARANG 계열로 승격';
 COMMENT ON COLUMN SARANG_INTAKE_QUEUE.SOURCE_LINK IS '유입 링크 번호(1~6) — 질적 찾기(2/4/6)·선한 양치기(1/3/5) 화면 라우팅 기준. SARANG에는 없음(대기열 전용)';
-COMMENT ON COLUMN SARANG_INTAKE_QUEUE.STATUS      IS 'pending=대기, accepted=이관 확정(SARANG 생성됨), rejected=반려(SARANG 생성 안 함)';
+COMMENT ON COLUMN SARANG_INTAKE_QUEUE.STATUS      IS 'pending=shed 신청 직후, submitted=shed 관리자가 이관하기 클릭(Ddochi 검토 대기), accepted=Ddochi 담당자가 이관받기(SARANG 생성됨), rejected=Ddochi 담당자가 반려(SARANG 생성 안 함)';
 COMMENT ON COLUMN SARANG_INTAKE_QUEUE.REST_TYPE   IS '신청 폼에서 고른 휴식 유형 — shed 신청서 자체 필드, SARANG에는 안 넘어감';
 
 COMMIT;

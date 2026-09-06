@@ -289,8 +289,8 @@ def shed_register(request, *args, **kwargs):
     )
     if not intake:
         return JsonResponse({'success': False, 'message': '대기열 항목을 찾을 수 없습니다'}, status=404)
-    if intake['status'] != 'pending':
-        return JsonResponse({'success': False, 'message': f"이미 처리된 항목입니다({intake['status']})"}, status=400)
+    if intake['status'] != 'submitted':
+        return JsonResponse({'success': False, 'message': f"아직 이관 요청되지 않았거나 이미 처리된 항목입니다({intake['status']})"}, status=400)
 
     sabun = request.user['sabun']
     personal_info_id = hashlib.sha256(f"{intake['name']}|{intake['phone_normalized']}".encode('utf-8')).hexdigest()
@@ -482,8 +482,8 @@ def shed_pending_reject(request, *args, **kwargs):
     intake = client.query_one("SELECT STATUS FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :1", [intake_id])
     if not intake:
         return JsonResponse({'success': False, 'message': '대기열 항목을 찾을 수 없습니다'}, status=404)
-    if intake['status'] != 'pending':
-        return JsonResponse({'success': False, 'message': f"이미 처리된 항목입니다({intake['status']})"}, status=400)
+    if intake['status'] != 'submitted':
+        return JsonResponse({'success': False, 'message': f"아직 이관 요청되지 않았거나 이미 처리된 항목입니다({intake['status']})"}, status=400)
 
     client.exec(
         """UPDATE SARANG_INTAKE_QUEUE SET STATUS = 'rejected', REVIEWED_BY_MEMBER_ID = :1, REVIEWED_AT = SYSTIMESTAMP
@@ -495,8 +495,11 @@ def shed_pending_reject(request, *args, **kwargs):
 
 @csrf_exempt
 def shed_webhook(request, *args, **kwargs):
-    """shed 프로젝트(Google Apps Script 경유)가 호출 — SARANG_INTAKE_QUEUE에 pending으로 적재.
-    SARANG 승격은 담당자가 별도로 수락할 때(추후 구현)."""
+    """shed 프로젝트(Google Apps Script 경유)가 호출.
+    - 최초 신청(name/phone 포함): SARANG_INTAKE_QUEUE에 pending으로 적재.
+    - {type:'update', rowNum}: shed 관리자의 "이관하기" — pending을 submitted로
+      전환만 함(Ddochi 담당자의 이관받기/반려하기를 건너뛰지 않도록, SARANG은
+      아직 안 만듦)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -505,6 +508,19 @@ def shed_webhook(request, *args, **kwargs):
         return JsonResponse({'ok': False}, status=401)
 
     body = _json_body(request)
+
+    if body.get('type') == 'update':
+        intake_id = str(body.get('rowNum') or '').strip()
+        if not intake_id:
+            return JsonResponse({'ok': False, 'message': 'rowNum 필요'}, status=400)
+        affected = DataRouterClient().exec(
+            "UPDATE SARANG_INTAKE_QUEUE SET STATUS = 'submitted' WHERE INTAKE_ID = :1 AND STATUS = 'pending'",
+            [intake_id],
+        )
+        if not affected:
+            return JsonResponse({'ok': False, 'message': '대상을 찾을 수 없거나 이미 처리됨'}, status=400)
+        return JsonResponse({'ok': True})
+
     name = str(body.get('name') or '').strip()
     phone_raw = re.sub(r'\s', '', str(body.get('phone') or ''))
     phone_normalized = re.sub(r'[^0-9]', '', phone_raw)
@@ -550,7 +566,8 @@ def shed_webhook(request, *args, **kwargs):
 @csrf_exempt
 @require_jwt
 def shed_pending_list(request, *args, **kwargs):
-    """SARANG_INTAKE_QUEUE의 pending 항목 목록."""
+    """SARANG_INTAKE_QUEUE의 submitted(shed 관리자가 이관하기 클릭한) 항목 목록 —
+    Ddochi 담당자의 이관받기/반려하기 대상."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -558,7 +575,7 @@ def shed_pending_list(request, *args, **kwargs):
         """SELECT INTAKE_ID, NAME, PHONE, AGE, SOURCE_LINK, REGION_NAME, REACTION,
                   LOCATION, TM_RESERVED_AT, CREATED_AT
              FROM SARANG_INTAKE_QUEUE
-            WHERE STATUS = 'pending'
+            WHERE STATUS = 'submitted'
             ORDER BY CREATED_AT ASC"""
     )
     list_ = [{
