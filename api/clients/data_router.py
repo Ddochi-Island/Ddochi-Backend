@@ -51,6 +51,19 @@ class DataRouterClient:
             body['idempotency_key'] = idempotency_key
         return self._post(body).get('rows_affected', 0)
 
+    def tx(self, statements, priority='normal', timeout_ms=0, idempotency_key=None):
+        """statements: [{'sql': ..., 'args': [...]}, ...] — 한 트랜잭션으로 순서대로 실행."""
+        body = {
+            'caller': self.caller,
+            'op': 'tx',
+            'statements': [{'sql': s['sql'], 'args': s.get('args') or []} for s in statements],
+            'priority': priority,
+            'timeout_ms': timeout_ms,
+        }
+        if idempotency_key:
+            body['idempotency_key'] = idempotency_key
+        return self._post(body).get('rows_affected', 0)
+
     def ping(self):
         return self._post({'caller': self.caller, 'op': 'ping'})
 

@@ -1,4 +1,5 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
+import hashlib
 import json
 import re
 import time
@@ -270,11 +271,63 @@ def save_tm_script(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def shed_register(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-register 포팅
+    """SARANG_INTAKE_QUEUE 수락 처리 — pending 항목을 SARANG_PERSONAL_INFO/
+    SARANG/SARANG_INFLOW_DETAILS로 승격. 수락한 담당자가 INFLOW_MEMBER_ID가 됨."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    intake_id = str(body.get('intakeId') or '').strip()
+    if not intake_id:
+        return JsonResponse({'success': False, 'message': 'intakeId 필요'}, status=400)
+
+    client = DataRouterClient()
+    intake = client.query_one(
+        "SELECT * FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :1", [intake_id]
+    )
+    if not intake:
+        return JsonResponse({'success': False, 'message': '대기열 항목을 찾을 수 없습니다'}, status=404)
+    if intake['status'] != 'pending':
+        return JsonResponse({'success': False, 'message': f"이미 처리된 항목입니다({intake['status']})"}, status=400)
+
+    sabun = request.user['sabun']
+    personal_info_id = hashlib.sha256(f"{intake['name']}|{intake['phone_normalized']}".encode('utf-8')).hexdigest()
+    sarang_id = uuid.uuid4().hex.upper()
+
+    stmts = []
+    existing_pi = client.query_one(
+        "SELECT PERSONAL_INFO_ID FROM SARANG_PERSONAL_INFO WHERE PERSONAL_INFO_ID = :1", [personal_info_id]
+    )
+    if not existing_pi:
+        stmts.append({
+            'sql': """INSERT INTO SARANG_PERSONAL_INFO (PERSONAL_INFO_ID, NAME, PHONE, PHONE_NORMALIZED)
+                      VALUES (:1, :2, :3, :4)""",
+            'args': [personal_info_id, intake['name'], intake['phone'], intake['phone_normalized']],
+        })
+    stmts.append({
+        'sql': """INSERT INTO SARANG
+                    (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, STAGE, TM_STATUS,
+                     RECRUITMENT_TYPE, INFLOW_DATE, CREATED_BY, UPDATED_BY)
+                  VALUES (:1, :2, :3, :4, '유입', '시작전', 'OFFLINE', SYSTIMESTAMP, :5, :5)""",
+        'args': [sarang_id, personal_info_id, sabun, intake['age'], sabun],
+    })
+    # TM_RESERVED_AT은 TIMESTAMP 컬럼 — go-ora로 조회한 문자열을 그대로 다시 바인딩하면
+    # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
+    stmts.append({
+        'sql': """INSERT INTO SARANG_INFLOW_DETAILS (SARANG_ID, REGION_NAME, REACTION, LOCATION, TM_RESERVED_AT)
+                  SELECT :1, REGION_NAME, REACTION, LOCATION, TM_RESERVED_AT
+                    FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :2""",
+        'args': [sarang_id, intake_id],
+    })
+    stmts.append({
+        'sql': """UPDATE SARANG_INTAKE_QUEUE SET STATUS = 'accepted', REVIEWED_BY_MEMBER_ID = :1, REVIEWED_AT = SYSTIMESTAMP
+                  WHERE INTAKE_ID = :2""",
+        'args': [sabun, intake_id],
+    })
+    client.tx(stmts)
+    return JsonResponse({'success': True, 'sarangId': sarang_id})
 
 
 @csrf_exempt
@@ -416,11 +469,30 @@ def shed_lookup_teams(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def shed_pending_reject(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-pending-reject 포팅
+    """SARANG_INTAKE_QUEUE 반려 처리 — SARANG 행은 만들지 않고 상태만 rejected로."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    intake_id = str(body.get('intakeId') or '').strip()
+    if not intake_id:
+        return JsonResponse({'success': False, 'message': 'intakeId 필요'}, status=400)
+
+    client = DataRouterClient()
+    intake = client.query_one("SELECT STATUS FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :1", [intake_id])
+    if not intake:
+        return JsonResponse({'success': False, 'message': '대기열 항목을 찾을 수 없습니다'}, status=404)
+    if intake['status'] != 'pending':
+        return JsonResponse({'success': False, 'message': f"이미 처리된 항목입니다({intake['status']})"}, status=400)
+
+    client.exec(
+        """UPDATE SARANG_INTAKE_QUEUE SET STATUS = 'rejected', REVIEWED_BY_MEMBER_ID = :1, REVIEWED_AT = SYSTIMESTAMP
+           WHERE INTAKE_ID = :2""",
+        [request.user['sabun'], intake_id],
+    )
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
@@ -477,9 +549,23 @@ def shed_webhook(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def shed_pending_list(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed/pending-list 포팅
+    """SARANG_INTAKE_QUEUE의 pending 항목 목록."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    rows = DataRouterClient().query(
+        """SELECT INTAKE_ID, NAME, PHONE, AGE, SOURCE_LINK, REGION_NAME, REACTION,
+                  LOCATION, TM_RESERVED_AT, CREATED_AT
+             FROM SARANG_INTAKE_QUEUE
+            WHERE STATUS = 'pending'
+            ORDER BY CREATED_AT ASC"""
+    )
+    list_ = [{
+        'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
+        'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
+        'location': r['location'], 'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
+    } for r in rows]
+    return JsonResponse({'success': True, 'list': list_})
 
