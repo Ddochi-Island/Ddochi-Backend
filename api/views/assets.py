@@ -518,6 +518,7 @@ def shed_webhook(request, *args, **kwargs):
     reaction = str(body.get('reaction') or '').strip() or None
     tm_location = str(body.get('tmLocation') or '').strip() or None
     tm_datetime = str(body.get('tmDatetime') or '').strip() or None
+    rest_type = str(body.get('rest') or '').strip() or None
 
     if not name or len(phone_normalized) < 10:
         return JsonResponse({'ok': False, 'message': '이름/전화번호 필요'}, status=400)
@@ -537,11 +538,11 @@ def shed_webhook(request, *args, **kwargs):
     client.exec(
         """INSERT INTO SARANG_INTAKE_QUEUE
              (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, SOURCE_LINK,
-              REGION_NAME, REACTION, LOCATION, TM_RESERVED_AT)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9,
-                   CASE WHEN :10 IS NOT NULL THEN TO_TIMESTAMP(:10, 'YYYY-MM-DD"T"HH24:MI') END)""",
+              REGION_NAME, REACTION, LOCATION, REST_TYPE, TM_RESERVED_AT)
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10,
+                   CASE WHEN :11 IS NOT NULL THEN TO_TIMESTAMP(:11, 'YYYY-MM-DD"T"HH24:MI') END)""",
         [intake_id, name, phone_raw, phone_normalized, age, int(event),
-         region, reaction, tm_location, tm_datetime],
+         region, reaction, tm_location, rest_type, tm_datetime],
     )
     return JsonResponse({'ok': True, 'skipped': False, 'intakeId': intake_id})
 
