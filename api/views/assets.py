@@ -283,11 +283,93 @@ def shed_reject_duplicate(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def get_shed_prospects(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /get-shed-prospects 포팅
+    """schema-spec.md(Sarang Domain) 기준 재구현 — inflow_member의 현재 소속팀
+    (MEMBER_AFFILIATION_HISTORIES.IS_CURRENT=1) 범위로 사랑이 목록을 반환."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    team_id = request.user.get('team')
+    if not team_id:
+        return JsonResponse({'success': False, 'list': [], 'message': '소속팀 정보가 없습니다'}, status=400)
+
+    client = DataRouterClient()
+    rows = client.query(
+        """SELECT s.SARANG_ID, s.STAGE, s.TM_STATUS, s.IS_DROPPED, s.AGE, s.MBTI,
+                  s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
+                  spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
+                  m.NAME AS INFLOW_MEMBER_NAME,
+                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.TM_RESERVED_AT,
+                  shjy.HAB_JAE_YANG_ID,
+                  gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
+             FROM SARANG s
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN MEMBERS m ON m.MEMBER_ID = s.INFLOW_MEMBER_ID
+             JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+             LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             LEFT JOIN SARANG_HAB_JAE_YANG shjy ON shjy.SARANG_ID = s.SARANG_ID AND shjy.IS_ACTIVE = 1
+             LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = shjy.GUIDE_MEMBER_ID
+             LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = shjy.CALLER_MEMBER_ID
+             LEFT JOIN MEMBERS tcm ON tcm.MEMBER_ID = shjy.TEACHER_MEMBER_ID
+            WHERE mah.REGION_CODE = :1 AND s.DELETED_AT IS NULL
+            ORDER BY s.CREATED_AT DESC""",
+        [team_id],
+    )
+
+    sarang_ids = [r['sarang_id'] for r in rows]
+    timeline_by_id = {sid: [] for sid in sarang_ids}
+    if sarang_ids:
+        placeholders = ', '.join(f':{i + 1}' for i in range(len(sarang_ids)))
+        call_rows = client.query(
+            f"""SELECT SARANG_ID, TM_ID AS LOG_ID, RESULT AS LABEL, CREATED_AT
+                  FROM TM_LOGS WHERE SARANG_ID IN ({placeholders})""",
+            sarang_ids,
+        )
+        activity_rows = client.query(
+            f"""SELECT SARANG_ID, ACTIVITY_ID AS LOG_ID, EVENT_TYPE AS LABEL, CREATED_AT
+                  FROM SARANG_ACTIVITY_LOGS WHERE SARANG_ID IN ({placeholders})""",
+            sarang_ids,
+        )
+        for r in call_rows + activity_rows:
+            timeline_by_id[r['sarang_id']].append(
+                {'id': r['log_id'], 'label': r['label'], 'createdAt': r['created_at']}
+            )
+        for sid in timeline_by_id:
+            timeline_by_id[sid].sort(key=lambda x: x['createdAt'], reverse=True)
+
+    list_ = []
+    for r in rows:
+        list_.append({
+            'sarangId': r['sarang_id'],
+            'name': r['name'],
+            'phone': r['phone'],
+            'age': r['age'],
+            'mbti': r['mbti'],
+            'residenceStation': r['residence_station'],
+            'stage': r['stage'],
+            'tmStatus': r['tm_status'],
+            'isDropped': r['is_dropped'] == '1',
+            'recruitmentType': r['recruitment_type'],
+            'inflowDate': r['inflow_date'],
+            'createdAt': r['created_at'],
+            'inflowMemberName': r['inflow_member_name'],
+            'inflowDetails': {
+                'regionName': r['region_name'],
+                'reaction': r['reaction'],
+                'location': r['location'],
+                'tmReservedAt': r['tm_reserved_at'],
+            },
+            'habJaeYang': {
+                'guideName': r['guide_name'],
+                'callerName': r['caller_name'],
+                'teacherName': r['teacher_name'],
+            } if r['hab_jae_yang_id'] else None,
+            'timeline': timeline_by_id.get(r['sarang_id'], []),
+        })
+
+    return JsonResponse({'success': True, 'list': list_})
 
 
 @csrf_exempt
