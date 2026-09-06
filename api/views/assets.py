@@ -513,9 +513,17 @@ def shed_webhook(request, *args, **kwargs):
         intake_id = str(body.get('rowNum') or '').strip()
         if not intake_id:
             return JsonResponse({'ok': False, 'message': 'rowNum 필요'}, status=400)
+        env = str(body.get('env') or '').strip() or None
+        reaction = str(body.get('reaction') or '').strip() or None
+        introducer = str(body.get('introducer') or '').strip() or None
+        tm_location = str(body.get('tmLocation') or '').strip() or None
+        tm_datetime = str(body.get('tmDatetime') or '').strip() or None
         affected = DataRouterClient().exec(
-            "UPDATE SARANG_INTAKE_QUEUE SET STATUS = 'submitted' WHERE INTAKE_ID = :1 AND STATUS = 'pending'",
-            [intake_id],
+            """UPDATE SARANG_INTAKE_QUEUE
+                  SET STATUS = 'submitted', ENV = :1, REACTION = :2, INTRODUCER_NAME = :3, LOCATION = :4,
+                      TM_RESERVED_AT = CASE WHEN :5 IS NOT NULL THEN TO_TIMESTAMP(:6, 'YYYY-MM-DD"T"HH24:MI') END
+                WHERE INTAKE_ID = :7 AND STATUS = 'pending'""",
+            [env, reaction, introducer, tm_location, tm_datetime, tm_datetime, intake_id],
         )
         if not affected:
             return JsonResponse({'ok': False, 'message': '대상을 찾을 수 없거나 이미 처리됨'}, status=400)
@@ -573,7 +581,7 @@ def shed_pending_list(request, *args, **kwargs):
 
     rows = DataRouterClient().query(
         """SELECT INTAKE_ID, NAME, PHONE, AGE, SOURCE_LINK, REGION_NAME, REACTION,
-                  LOCATION, TM_RESERVED_AT, CREATED_AT
+                  LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT, CREATED_AT
              FROM SARANG_INTAKE_QUEUE
             WHERE STATUS = 'submitted'
             ORDER BY CREATED_AT ASC"""
@@ -581,7 +589,8 @@ def shed_pending_list(request, *args, **kwargs):
     list_ = [{
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
-        'location': r['location'], 'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
+        'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
+        'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})
 
