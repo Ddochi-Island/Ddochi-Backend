@@ -1,7 +1,10 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
 import json
+import re
 import time
+import uuid
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -422,10 +425,55 @@ def shed_pending_reject(request, *args, **kwargs):
 
 @csrf_exempt
 def shed_webhook(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed-webhook 포팅
+    """shed 프로젝트(Google Apps Script 경유)가 호출 — SARANG_INTAKE_QUEUE에 pending으로 적재.
+    SARANG 승격은 담당자가 별도로 수락할 때(추후 구현)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    shed_key = settings.SHED_INTERNAL_KEY
+    if not shed_key or request.headers.get('X-Shed-Key') != shed_key:
+        return JsonResponse({'ok': False}, status=401)
+
+    body = _json_body(request)
+    name = str(body.get('name') or '').strip()
+    phone_raw = re.sub(r'\s', '', str(body.get('phone') or ''))
+    phone_normalized = re.sub(r'[^0-9]', '', phone_raw)
+    age = body.get('age')
+    try:
+        age = int(age) if age else None
+    except (TypeError, ValueError):
+        age = None
+    event = str(body.get('event') or '').strip()
+    region = str(body.get('region') or '').strip() or None
+    reaction = str(body.get('reaction') or '').strip() or None
+    tm_location = str(body.get('tmLocation') or '').strip() or None
+    tm_datetime = str(body.get('tmDatetime') or '').strip() or None
+
+    if not name or len(phone_normalized) < 10:
+        return JsonResponse({'ok': False, 'message': '이름/전화번호 필요'}, status=400)
+    if event not in ['1', '2', '3', '4', '5', '6']:
+        return JsonResponse({'ok': False, 'message': '링크 번호 오류'}, status=400)
+
+    client = DataRouterClient()
+    existing = client.query_one(
+        "SELECT INTAKE_ID FROM SARANG_INTAKE_QUEUE WHERE PHONE_NORMALIZED = :1 AND STATUS = 'pending' "
+        "FETCH FIRST 1 ROWS ONLY",
+        [phone_normalized],
+    )
+    if existing:
+        return JsonResponse({'ok': True, 'skipped': True})
+
+    intake_id = uuid.uuid4().hex.upper()
+    client.exec(
+        """INSERT INTO SARANG_INTAKE_QUEUE
+             (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, SOURCE_LINK,
+              REGION_NAME, REACTION, LOCATION, TM_RESERVED_AT)
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9,
+                   CASE WHEN :10 IS NOT NULL THEN TO_TIMESTAMP(:10, 'YYYY-MM-DD"T"HH24:MI') END)""",
+        [intake_id, name, phone_raw, phone_normalized, age, int(event),
+         region, reaction, tm_location, tm_datetime],
+    )
+    return JsonResponse({'ok': True, 'skipped': False, 'intakeId': intake_id})
 
 
 @csrf_exempt
