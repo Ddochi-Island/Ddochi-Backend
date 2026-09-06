@@ -341,21 +341,19 @@ def shed_reject_duplicate(request, *args, **kwargs):
 @csrf_exempt
 @require_jwt
 def get_shed_prospects(request, *args, **kwargs):
-    """schema-spec.md(Sarang Domain) 기준 재구현 — inflow_member의 현재 소속팀
-    (MEMBER_AFFILIATION_HISTORIES.IS_CURRENT=1) 범위로 사랑이 목록을 반환."""
+    """schema-spec.md(Sarang Domain) 기준 재구현. 질적 찾기(2/4/6팀)·선한 양치기
+    (1/3/5팀)는 프론트에서 inflow_member의 현재 소속팀으로 묶어서 보여주는
+    구분이라(같은 화면에 3개 팀이 같이 보임), 서버는 팀으로 좁히지 않고 전체를
+    반환하면서 각 항목에 team을 실어준다."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-
-    team_id = request.user.get('team')
-    if not team_id:
-        return JsonResponse({'success': False, 'list': [], 'message': '소속팀 정보가 없습니다'}, status=400)
 
     client = DataRouterClient()
     rows = client.query(
         """SELECT s.SARANG_ID, s.STAGE, s.TM_STATUS, s.IS_DROPPED, s.AGE, s.MBTI,
                   s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
-                  m.NAME AS INFLOW_MEMBER_NAME,
+                  m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
                   sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.TM_RESERVED_AT,
                   shjy.HAB_JAE_YANG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
@@ -369,9 +367,8 @@ def get_shed_prospects(request, *args, **kwargs):
              LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = shjy.GUIDE_MEMBER_ID
              LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = shjy.CALLER_MEMBER_ID
              LEFT JOIN MEMBERS tcm ON tcm.MEMBER_ID = shjy.TEACHER_MEMBER_ID
-            WHERE mah.REGION_CODE = :1 AND s.DELETED_AT IS NULL
+            WHERE s.DELETED_AT IS NULL
             ORDER BY s.CREATED_AT DESC""",
-        [team_id],
     )
 
     sarang_ids = [r['sarang_id'] for r in rows]
@@ -411,6 +408,7 @@ def get_shed_prospects(request, *args, **kwargs):
             'inflowDate': r['inflow_date'],
             'createdAt': r['created_at'],
             'inflowMemberName': r['inflow_member_name'],
+            'team': r['team'],
             'inflowDetails': {
                 'regionName': r['region_name'],
                 'reaction': r['reaction'],
