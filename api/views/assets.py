@@ -415,7 +415,7 @@ def get_shed_prospects(request, *args, **kwargs):
     # 타임라인 맨 마지막(가장 오래된 항목)에 유입 자체를 하나의 로그처럼 넣어줌 —
     # "누가 유입했는지"가 통화기록보다 먼저(시간상 가장 앞) 보이도록.
     timeline_by_id = {
-        r['sarang_id']: [{'id': f"{r['sarang_id']}-inflow", 'label': '유입', 'category': None,
+        r['sarang_id']: [{'id': f"{r['sarang_id']}-inflow", 'label': '유입', 'category': None, 'source': 'inflow',
                            'actorName': r['inflow_member_name'], 'createdAt': r['inflow_date']}]
         for r in rows
     }
@@ -437,9 +437,16 @@ def get_shed_prospects(request, *args, **kwargs):
         # 프론트가 category로 특정 로그 존재 여부를 판단하는 곳(선문자/안받음문자/티엠예약
         # 중복 방지)이 있어 RESULT/EVENT_TYPE 값을 그 값으로 매핑해서 실어줌.
         LOG_CATEGORY = {'예약 티엠': 'tmReserved', '선문자발송': 'welcomeMsg', '부재중문자발송': 'noAnswerMsg'}
-        for r in call_rows + activity_rows:
+        # source: 실제 통화 시도(call)인지, 문자 발송 같은 비통화 이벤트(activity)인지 구분 —
+        # 문자만 보낸 건 통화를 시도한 게 아니라서 기존 예약을 무효화하면 안 됨(프론트에서 사용).
+        for r in call_rows:
             timeline_by_id[r['sarang_id']].append(
-                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']),
+                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']), 'source': 'call',
+                 'actorName': r['actor_name'], 'createdAt': r['created_at']}
+            )
+        for r in activity_rows:
+            timeline_by_id[r['sarang_id']].append(
+                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']), 'source': 'activity',
                  'actorName': r['actor_name'], 'createdAt': r['created_at']}
             )
         for sid in timeline_by_id:
