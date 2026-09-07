@@ -47,11 +47,11 @@ CREATE TABLE SARANG (
   STAGE               VARCHAR2(30 CHAR)            NOT NULL CHECK (STAGE IN (
                         '유입','티엠','만픽','합재양','재가','매칭','상따','성홀','성따','복방','센'
                       )),
-  IS_DROPPED          NUMBER(1)                    DEFAULT 0 NOT NULL CHECK (IS_DROPPED IN (0,1)),
-  APPROVAL_STATUS     VARCHAR2(15 CHAR)            CHECK (APPROVAL_STATUS IN ('대기','재가','반려','자동반려')),
-  TM_STATUS           VARCHAR2(15 CHAR)            CHECK (TM_STATUS IN ('시작전','진행중','장기','예약','완료')),
   RECRUITMENT_TYPE    VARCHAR2(20 CHAR)            NOT NULL CHECK (RECRUITMENT_TYPE IN ('OFFLINE','ONLINE')),
   INFLOW_DATE         TIMESTAMP(6) WITH TIME ZONE  NOT NULL,
+  CURRENT_PROCESS     VARCHAR2(30 CHAR)            CHECK (CURRENT_PROCESS IN (
+                        '합재양','재가대기','교사배정','매칭대기','매칭완료'
+                      )),
   CREATED_AT          TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
   UPDATED_AT          TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
   CREATED_BY          VARCHAR2(50 CHAR)            NOT NULL,
@@ -66,10 +66,8 @@ CREATE INDEX IX_SARANG_INFLOW  ON SARANG (INFLOW_MEMBER_ID, UPDATED_AT DESC);
 CREATE INDEX IX_SARANG_PI      ON SARANG (PERSONAL_INFO_ID);
 
 COMMENT ON TABLE  SARANG               IS '사랑이(대상자) 메인 테이블. PROSPECTS 대체';
-COMMENT ON COLUMN SARANG.STAGE         IS '퍼널 진행 단계. IS_DROPPED/APPROVAL_STATUS/TM_STATUS와 독립적으로 조합 가능(4축)';
-COMMENT ON COLUMN SARANG.IS_DROPPED    IS '중단 여부 — STAGE와 별개 축';
-COMMENT ON COLUMN SARANG.APPROVAL_STATUS IS '재가 라이프사이클';
-COMMENT ON COLUMN SARANG.TM_STATUS     IS 'TM 진행도';
+COMMENT ON COLUMN SARANG.STAGE           IS '퍼널 진행 단계 — 스펙 원안 그대로';
+COMMENT ON COLUMN SARANG.CURRENT_PROCESS IS '현재 진행 세부 단계 — 스펙 원안 그대로. 합재양 이후에만 의미 있어서 그 전엔 NULL';
 
 CREATE TABLE SARANG_INFLOW_DETAILS (
   SARANG_ID        VARCHAR2(50 CHAR)            PRIMARY KEY,

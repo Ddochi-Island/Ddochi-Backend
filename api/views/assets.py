@@ -308,9 +308,9 @@ def shed_register(request, *args, **kwargs):
         })
     stmts.append({
         'sql': """INSERT INTO SARANG
-                    (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, STAGE, TM_STATUS,
+                    (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, STAGE,
                      RECRUITMENT_TYPE, INFLOW_DATE, CREATED_BY, UPDATED_BY)
-                  VALUES (:1, :2, :3, :4, '유입', '시작전', 'OFFLINE', SYSTIMESTAMP, :5, :5)""",
+                  VALUES (:1, :2, :3, :4, '유입', 'OFFLINE', SYSTIMESTAMP, :5, :5)""",
         'args': [sarang_id, personal_info_id, sabun, intake['age'], sabun],
     })
     # TM_RESERVED_AT은 TIMESTAMP 컬럼 — go-ora로 조회한 문자열을 그대로 다시 바인딩하면
@@ -350,7 +350,7 @@ def get_shed_prospects(request, *args, **kwargs):
 
     client = DataRouterClient()
     rows = client.query(
-        """SELECT s.SARANG_ID, s.STAGE, s.TM_STATUS, s.IS_DROPPED, s.AGE, s.MBTI,
+        """SELECT s.SARANG_ID, s.STAGE, s.CURRENT_PROCESS, s.AGE, s.MBTI,
                   s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
@@ -402,8 +402,7 @@ def get_shed_prospects(request, *args, **kwargs):
             'mbti': r['mbti'],
             'residenceStation': r['residence_station'],
             'stage': r['stage'],
-            'tmStatus': r['tm_status'],
-            'isDropped': r['is_dropped'] == '1',
+            'currentProcess': r['current_process'],
             'recruitmentType': r['recruitment_type'],
             'inflowDate': r['inflow_date'],
             'createdAt': r['created_at'],
