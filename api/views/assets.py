@@ -77,11 +77,50 @@ def update_match(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def submit_result(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /submit-result 포팅
+    """TM 통화/진행 결과 기록. 통화 결과는 TM_LOGS(RESULT), 통화가 아닌 이벤트(문자 발송)는
+    SARANG_ACTIVITY_LOGS(EVENT_TYPE)에 남김 — 두 테이블의 CHECK 제약과 1:1로 맞춘 매핑.
+    logType='만남픽스'는 SARANG.STAGE 전환(합재양 작성 플로우)까지 얽혀 있어 아직 미구현."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    data = body.get('data') or {}
+    sarang_id = str(data.get('rowIndex') or '').strip()
+    log_type = data.get('logType')
+    log_content = str(data.get('logContent') or '').strip() or None
+    if not sarang_id:
+        return JsonResponse({'success': False, 'message': 'rowIndex 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    TM_RESULT = {'안받음': '부재중', '비합처리': '비합', '거절처리': '거절'}
+    ACTIVITY_EVENT = {'선문자': '선문자발송', '안받문': '부재중문자발송'}
+
+    if log_type in TM_RESULT:
+        client.exec(
+            "INSERT INTO TM_LOGS (TM_ID, SARANG_ID, CALLER_MEMBER_ID, RESULT, SUB_REASON) VALUES (:1, :2, :3, :4, :5)",
+            [uuid.uuid4().hex.upper(), sarang_id, sabun, TM_RESULT[log_type], log_content],
+        )
+    elif log_type == '티엠예약':
+        next_date = str((data.get('tmNote') or {}).get('nextCallDate') or '').strip() or None
+        client.exec(
+            """INSERT INTO TM_LOGS (TM_ID, SARANG_ID, CALLER_MEMBER_ID, RESULT, RESERVED_TM_AT)
+               VALUES (:1, :2, :3, '예약 티엠',
+                       CASE WHEN :4 IS NOT NULL THEN TO_TIMESTAMP(:4, 'YYYY-MM-DD"T"HH24:MI') END)""",
+            [uuid.uuid4().hex.upper(), sarang_id, sabun, next_date],
+        )
+    elif log_type in ACTIVITY_EVENT:
+        client.exec(
+            "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE) VALUES (:1, :2, :3, :4)",
+            [uuid.uuid4().hex.upper(), sarang_id, sabun, ACTIVITY_EVENT[log_type]],
+        )
+    else:
+        return JsonResponse({'success': False, 'message': f'아직 지원 안 되는 처리예요: {log_type}'}, status=400)
+
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
@@ -387,9 +426,12 @@ def get_shed_prospects(request, *args, **kwargs):
                   FROM SARANG_ACTIVITY_LOGS WHERE SARANG_ID IN ({placeholders})""",
             sarang_ids,
         )
+        # 프론트가 category로 특정 로그 존재 여부를 판단하는 곳(선문자/안받음문자/티엠예약
+        # 중복 방지)이 있어 RESULT/EVENT_TYPE 값을 그 값으로 매핑해서 실어줌.
+        LOG_CATEGORY = {'예약 티엠': 'tmReserved', '선문자발송': 'welcomeMsg', '부재중문자발송': 'noAnswerMsg'}
         for r in call_rows + activity_rows:
             timeline_by_id[r['sarang_id']].append(
-                {'id': r['log_id'], 'label': r['label'], 'createdAt': r['created_at']}
+                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']), 'createdAt': r['created_at']}
             )
         for sid in timeline_by_id:
             timeline_by_id[sid].sort(key=lambda x: x['createdAt'], reverse=True)
