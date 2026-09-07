@@ -412,18 +412,26 @@ def get_shed_prospects(request, *args, **kwargs):
     )
 
     sarang_ids = [r['sarang_id'] for r in rows]
-    timeline_by_id = {sid: [] for sid in sarang_ids}
+    # 타임라인 맨 마지막(가장 오래된 항목)에 유입 자체를 하나의 로그처럼 넣어줌 —
+    # "누가 유입했는지"가 통화기록보다 먼저(시간상 가장 앞) 보이도록.
+    timeline_by_id = {
+        r['sarang_id']: [{'id': f"{r['sarang_id']}-inflow", 'label': '유입', 'category': None,
+                           'actorName': r['inflow_member_name'], 'createdAt': r['inflow_date']}]
+        for r in rows
+    }
     call_rows = []
     if sarang_ids:
         placeholders = ', '.join(f':{i + 1}' for i in range(len(sarang_ids)))
         call_rows = client.query(
-            f"""SELECT SARANG_ID, TM_ID AS LOG_ID, RESULT AS LABEL, CREATED_AT
-                  FROM TM_LOGS WHERE SARANG_ID IN ({placeholders})""",
+            f"""SELECT tl.SARANG_ID, tl.TM_ID AS LOG_ID, tl.RESULT AS LABEL, tl.CREATED_AT, cm.NAME AS ACTOR_NAME
+                  FROM TM_LOGS tl JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
+                 WHERE tl.SARANG_ID IN ({placeholders})""",
             sarang_ids,
         )
         activity_rows = client.query(
-            f"""SELECT SARANG_ID, ACTIVITY_ID AS LOG_ID, EVENT_TYPE AS LABEL, CREATED_AT
-                  FROM SARANG_ACTIVITY_LOGS WHERE SARANG_ID IN ({placeholders})""",
+            f"""SELECT al.SARANG_ID, al.ACTIVITY_ID AS LOG_ID, al.EVENT_TYPE AS LABEL, al.CREATED_AT, am.NAME AS ACTOR_NAME
+                  FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS am ON am.MEMBER_ID = al.ACTOR_MEMBER_ID
+                 WHERE al.SARANG_ID IN ({placeholders})""",
             sarang_ids,
         )
         # 프론트가 category로 특정 로그 존재 여부를 판단하는 곳(선문자/안받음문자/티엠예약
@@ -431,7 +439,8 @@ def get_shed_prospects(request, *args, **kwargs):
         LOG_CATEGORY = {'예약 티엠': 'tmReserved', '선문자발송': 'welcomeMsg', '부재중문자발송': 'noAnswerMsg'}
         for r in call_rows + activity_rows:
             timeline_by_id[r['sarang_id']].append(
-                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']), 'createdAt': r['created_at']}
+                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']),
+                 'actorName': r['actor_name'], 'createdAt': r['created_at']}
             )
         for sid in timeline_by_id:
             timeline_by_id[sid].sort(key=lambda x: x['createdAt'], reverse=True)
