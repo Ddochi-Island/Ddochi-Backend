@@ -373,6 +373,7 @@ def get_shed_prospects(request, *args, **kwargs):
 
     sarang_ids = [r['sarang_id'] for r in rows]
     timeline_by_id = {sid: [] for sid in sarang_ids}
+    call_rows = []
     if sarang_ids:
         placeholders = ', '.join(f':{i + 1}' for i in range(len(sarang_ids)))
         call_rows = client.query(
@@ -392,8 +393,19 @@ def get_shed_prospects(request, *args, **kwargs):
         for sid in timeline_by_id:
             timeline_by_id[sid].sort(key=lambda x: x['createdAt'], reverse=True)
 
+    # IS_DROPPED 컬럼을 없애고 tm_logs 기준으로 판단하기로 함 — 별도 상태
+    # 저장 없이, 가장 최근 통화 결과가 거절/비합/무효면 중단된 것으로 취급.
+    DROPPED_RESULTS = {'거절', '비합', '무효'}
+    latest_call_by_id = {}
+    for r in call_rows:
+        prev = latest_call_by_id.get(r['sarang_id'])
+        if not prev or r['created_at'] > prev['created_at']:
+            latest_call_by_id[r['sarang_id']] = r
+
     list_ = []
     for r in rows:
+        latest_call = latest_call_by_id.get(r['sarang_id'])
+        is_dropped = bool(latest_call) and latest_call['label'] in DROPPED_RESULTS
         list_.append({
             'sarangId': r['sarang_id'],
             'name': r['name'],
@@ -403,6 +415,8 @@ def get_shed_prospects(request, *args, **kwargs):
             'residenceStation': r['residence_station'],
             'stage': r['stage'],
             'currentProcess': r['current_process'],
+            'isDropped': is_dropped,
+            'droppedReason': latest_call['label'] if is_dropped else None,
             'recruitmentType': r['recruitment_type'],
             'inflowDate': r['inflow_date'],
             'createdAt': r['created_at'],
