@@ -597,7 +597,7 @@ def shed_pending_list(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
     rows = DataRouterClient().query(
-        """SELECT INTAKE_ID, NAME, PHONE, AGE, SOURCE_LINK, REGION_NAME, REACTION,
+        """SELECT INTAKE_ID, NAME, PHONE, AGE, MBTI, SOURCE_LINK, REGION_NAME, REACTION,
                   LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT, CREATED_AT
              FROM SARANG_INTAKE_QUEUE
             WHERE STATUS = 'submitted'
@@ -605,9 +605,53 @@ def shed_pending_list(request, *args, **kwargs):
     )
     list_ = [{
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
-        'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
+        'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})
+
+
+@csrf_exempt
+@require_jwt
+def shed_pending_rejected_list(request, *args, **kwargs):
+    """SARANG_INTAKE_QUEUE의 rejected 항목 목록 — 회생하기(되살리기) 대상."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    rows = DataRouterClient().query(
+        """SELECT INTAKE_ID, NAME, PHONE, AGE, MBTI, SOURCE_LINK, REGION_NAME, REACTION,
+                  LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT, CREATED_AT
+             FROM SARANG_INTAKE_QUEUE
+            WHERE STATUS = 'rejected'
+            ORDER BY REVIEWED_AT DESC"""
+    )
+    list_ = [{
+        'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
+        'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
+        'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
+        'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
+    } for r in rows]
+    return JsonResponse({'success': True, 'list': list_})
+
+
+@csrf_exempt
+@require_jwt
+def shed_pending_revive(request, *args, **kwargs):
+    """반려된(rejected) 큐 항목을 되살려 submitted로 되돌림 — 이관받기 목록에 재등장."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    body = _json_body(request)
+    intake_id = str(body.get('intakeId') or '').strip()
+    if not intake_id:
+        return JsonResponse({'success': False, 'message': 'intakeId 필요'}, status=400)
+
+    affected = DataRouterClient().exec(
+        "UPDATE SARANG_INTAKE_QUEUE SET STATUS = 'submitted' WHERE INTAKE_ID = :1 AND STATUS = 'rejected'",
+        [intake_id],
+    )
+    if not affected:
+        return JsonResponse({'success': False, 'message': '반려 상태인 건을 찾을 수 없어요'}, status=400)
+    return JsonResponse({'success': True})
 
