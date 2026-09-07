@@ -308,10 +308,10 @@ def shed_register(request, *args, **kwargs):
         })
     stmts.append({
         'sql': """INSERT INTO SARANG
-                    (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, STAGE,
+                    (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, MBTI, STAGE,
                      RECRUITMENT_TYPE, INFLOW_DATE, CREATED_BY, UPDATED_BY)
-                  VALUES (:1, :2, :3, :4, '유입', 'OFFLINE', SYSTIMESTAMP, :5, :5)""",
-        'args': [sarang_id, personal_info_id, sabun, intake['age'], sabun],
+                  VALUES (:1, :2, :3, :4, :5, '유입', 'OFFLINE', SYSTIMESTAMP, :6, :6)""",
+        'args': [sarang_id, personal_info_id, sabun, intake['age'], intake['mbti'], sabun],
     })
     # TM_RESERVED_AT은 TIMESTAMP 컬럼 — go-ora로 조회한 문자열을 그대로 다시 바인딩하면
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
@@ -559,6 +559,7 @@ def shed_webhook(request, *args, **kwargs):
     tm_location = str(body.get('tmLocation') or '').strip() or None
     tm_datetime = str(body.get('tmDatetime') or '').strip() or None
     rest_type = str(body.get('rest') or '').strip() or None
+    mbti = str(body.get('mbti') or '').strip() or None
 
     if not name or len(phone_normalized) < 10:
         return JsonResponse({'ok': False, 'message': '이름/전화번호 필요'}, status=400)
@@ -577,11 +578,11 @@ def shed_webhook(request, *args, **kwargs):
     intake_id = uuid.uuid4().hex.upper()
     client.exec(
         """INSERT INTO SARANG_INTAKE_QUEUE
-             (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, SOURCE_LINK,
+             (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, MBTI, SOURCE_LINK,
               REGION_NAME, REACTION, LOCATION, REST_TYPE, TM_RESERVED_AT)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10,
-                   CASE WHEN :11 IS NOT NULL THEN TO_TIMESTAMP(:11, 'YYYY-MM-DD"T"HH24:MI') END)""",
-        [intake_id, name, phone_raw, phone_normalized, age, int(event),
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11,
+                   CASE WHEN :12 IS NOT NULL THEN TO_TIMESTAMP(:12, 'YYYY-MM-DD"T"HH24:MI') END)""",
+        [intake_id, name, phone_raw, phone_normalized, age, mbti, int(event),
          region, reaction, tm_location, rest_type, tm_datetime],
     )
     return JsonResponse({'ok': True, 'skipped': False, 'intakeId': intake_id})

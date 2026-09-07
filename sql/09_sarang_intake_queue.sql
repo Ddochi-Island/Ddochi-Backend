@@ -20,6 +20,7 @@ CREATE TABLE SARANG_INTAKE_QUEUE (
   PHONE                 VARCHAR2(20 CHAR)            NOT NULL,
   PHONE_NORMALIZED      VARCHAR2(20 CHAR)            NOT NULL,
   AGE                   NUMBER(3),
+  MBTI                  VARCHAR2(10 CHAR),
   SOURCE_LINK           NUMBER(1)                    NOT NULL CHECK (SOURCE_LINK BETWEEN 1 AND 6),
   REGION_NAME           VARCHAR2(50 CHAR),
   REACTION              VARCHAR2(100 CHAR),
