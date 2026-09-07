@@ -449,10 +449,13 @@ def get_shed_prospects(request, *args, **kwargs):
     # 저장 없이, 가장 최근 통화 결과가 거절/비합/무효면 중단된 것으로 취급.
     DROPPED_RESULTS = {'거절', '비합', '무효'}
     latest_call_by_id = {}
+    no_answer_count_by_id = {}
     for r in call_rows:
         prev = latest_call_by_id.get(r['sarang_id'])
         if not prev or r['created_at'] > prev['created_at']:
             latest_call_by_id[r['sarang_id']] = r
+        if r['label'] == '부재중':
+            no_answer_count_by_id[r['sarang_id']] = no_answer_count_by_id.get(r['sarang_id'], 0) + 1
 
     list_ = []
     for r in rows:
@@ -474,6 +477,7 @@ def get_shed_prospects(request, *args, **kwargs):
             'createdAt': r['created_at'],
             'inflowMemberName': r['inflow_member_name'],
             'team': r['team'],
+            'noAnswerCount': no_answer_count_by_id.get(r['sarang_id'], 0),
             'inflowDetails': {
                 'regionName': r['region_name'],
                 'reaction': r['reaction'],
