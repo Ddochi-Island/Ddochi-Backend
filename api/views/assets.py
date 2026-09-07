@@ -475,11 +475,32 @@ def shed_revive(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def shed_lookup_teams(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /shed/lookup-teams 포팅
+    """유입자 이름 목록 → 그 사람의 현재 소속팀(REGION_CODE) 맵. shed 링크 번호(SOURCE_LINK)는
+    신청 당시 고정값이라, 실제 유입자가 다른 팀 소속이면 그 팀으로 이관되도록 프론트에서
+    이 값을 링크 번호보다 우선해서 씀."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    names = [str(n).strip() for n in (body.get('names') or []) if isinstance(n, str) and str(n).strip()][:200]
+    if not names:
+        return JsonResponse({'ok': True, 'teams': {}})
+
+    placeholders = ', '.join(f':{i + 1}' for i in range(len(names)))
+    rows = DataRouterClient().query(
+        f"""SELECT m.NAME, mah.REGION_CODE AS TEAM
+              FROM MEMBERS m
+              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+             WHERE m.NAME IN ({placeholders}) AND m.DELETED_AT IS NULL""",
+        names,
+    )
+    teams = {}
+    for r in rows:
+        if r['team'] and r['name'] not in teams:
+            teams[r['name']] = r['team']
+    return JsonResponse({'ok': True, 'teams': teams})
 
 
 @csrf_exempt
