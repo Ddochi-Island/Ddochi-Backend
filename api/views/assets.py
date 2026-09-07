@@ -316,8 +316,9 @@ def shed_register(request, *args, **kwargs):
     # TM_RESERVED_AT은 TIMESTAMP 컬럼 — go-ora로 조회한 문자열을 그대로 다시 바인딩하면
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
     stmts.append({
-        'sql': """INSERT INTO SARANG_INFLOW_DETAILS (SARANG_ID, REGION_NAME, REACTION, LOCATION, TM_RESERVED_AT)
-                  SELECT :1, REGION_NAME, REACTION, LOCATION, TM_RESERVED_AT
+        'sql': """INSERT INTO SARANG_INFLOW_DETAILS
+                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT)
+                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT
                     FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :2""",
         'args': [sarang_id, intake_id],
     })
@@ -354,7 +355,7 @@ def get_shed_prospects(request, *args, **kwargs):
                   s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
-                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.TM_RESERVED_AT,
+                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.INTRODUCER_NAME, sid.TM_RESERVED_AT,
                   shjy.HAB_JAE_YANG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
              FROM SARANG s
@@ -426,6 +427,8 @@ def get_shed_prospects(request, *args, **kwargs):
                 'regionName': r['region_name'],
                 'reaction': r['reaction'],
                 'location': r['location'],
+                'env': r['env'],
+                'introducerName': r['introducer_name'],
                 'tmReservedAt': r['tm_reserved_at'],
             },
             'habJaeYang': {
