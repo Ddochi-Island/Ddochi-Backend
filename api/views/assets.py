@@ -96,7 +96,9 @@ def submit_result(request, *args, **kwargs):
     sabun = request.user['sabun']
     client = DataRouterClient()
 
-    TM_RESULT = {'안받음': '부재중', '비합처리': '비합', '거절처리': '거절'}
+    # logContent는 이제 한글 사유 텍스트가 아니라 TM_SUB_REASON_CODES.SUB_CODE(예:
+    # PERSONALITY_UNFIT)를 프론트에서 그대로 보냄 — RESULT처럼 CHECK 대신 FK로 검증됨.
+    TM_RESULT = {'안받음': 'NO_ANSWER', '비합처리': 'UNFIT', '거절처리': 'REJECT', '무효처리': 'INVALID'}
     ACTIVITY_EVENT = {'선문자': '선문자발송', '안받문': '부재중문자발송'}
 
     if log_type in TM_RESULT:
@@ -108,7 +110,7 @@ def submit_result(request, *args, **kwargs):
         next_date = str((data.get('tmNote') or {}).get('nextCallDate') or '').strip() or None
         client.exec(
             """INSERT INTO TM_LOGS (TM_ID, SARANG_ID, CALLER_MEMBER_ID, RESULT, RESERVED_TM_AT)
-               VALUES (:1, :2, :3, '예약 티엠',
+               VALUES (:1, :2, :3, 'RESERVED_TM',
                        CASE WHEN :4 IS NOT NULL THEN TO_TIMESTAMP(:4, 'YYYY-MM-DD"T"HH24:MI') END)""",
             [uuid.uuid4().hex.upper(), sarang_id, sabun, next_date],
         )
@@ -423,8 +425,10 @@ def get_shed_prospects(request, *args, **kwargs):
     if sarang_ids:
         placeholders = ', '.join(f':{i + 1}' for i in range(len(sarang_ids)))
         call_rows = client.query(
-            f"""SELECT tl.SARANG_ID, tl.TM_ID AS LOG_ID, tl.RESULT AS LABEL, tl.CREATED_AT, cm.NAME AS ACTOR_NAME
-                  FROM TM_LOGS tl JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
+            f"""SELECT tl.SARANG_ID, tl.TM_ID AS LOG_ID, tl.RESULT, trc.LABEL, tl.CREATED_AT, cm.NAME AS ACTOR_NAME
+                  FROM TM_LOGS tl
+                  JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
+                  JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = tl.RESULT
                  WHERE tl.SARANG_ID IN ({placeholders})""",
             sarang_ids,
         )
@@ -435,13 +439,14 @@ def get_shed_prospects(request, *args, **kwargs):
             sarang_ids,
         )
         # 프론트가 category로 특정 로그 존재 여부를 판단하는 곳(선문자/안받음문자/티엠예약
-        # 중복 방지)이 있어 RESULT/EVENT_TYPE 값을 그 값으로 매핑해서 실어줌.
-        LOG_CATEGORY = {'예약 티엠': 'tmReserved', '선문자발송': 'welcomeMsg', '부재중문자발송': 'noAnswerMsg'}
+        # 중복 방지)이 있어 RESULT 코드/EVENT_TYPE 값을 그 값으로 매핑해서 실어줌. TM_LOGS
+        # 쪽은 코드화됐지만 SARANG_ACTIVITY_LOGS.EVENT_TYPE은 아직 한글 그대로임(이번 범위 밖).
+        LOG_CATEGORY = {'RESERVED_TM': 'tmReserved', '선문자발송': 'welcomeMsg', '부재중문자발송': 'noAnswerMsg'}
         # source: 실제 통화 시도(call)인지, 문자 발송 같은 비통화 이벤트(activity)인지 구분 —
         # 문자만 보낸 건 통화를 시도한 게 아니라서 기존 예약을 무효화하면 안 됨(프론트에서 사용).
         for r in call_rows:
             timeline_by_id[r['sarang_id']].append(
-                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['label']), 'source': 'call',
+                {'id': r['log_id'], 'label': r['label'], 'category': LOG_CATEGORY.get(r['result']), 'source': 'call',
                  'actorName': r['actor_name'], 'createdAt': r['created_at']}
             )
         for r in activity_rows:
@@ -454,20 +459,20 @@ def get_shed_prospects(request, *args, **kwargs):
 
     # IS_DROPPED 컬럼을 없애고 tm_logs 기준으로 판단하기로 함 — 별도 상태
     # 저장 없이, 가장 최근 통화 결과가 거절/비합/무효면 중단된 것으로 취급.
-    DROPPED_RESULTS = {'거절', '비합', '무효'}
+    DROPPED_RESULTS = {'REJECT', 'UNFIT', 'INVALID'}
     latest_call_by_id = {}
     no_answer_count_by_id = {}
     for r in call_rows:
         prev = latest_call_by_id.get(r['sarang_id'])
         if not prev or r['created_at'] > prev['created_at']:
             latest_call_by_id[r['sarang_id']] = r
-        if r['label'] == '부재중':
+        if r['result'] == 'NO_ANSWER':
             no_answer_count_by_id[r['sarang_id']] = no_answer_count_by_id.get(r['sarang_id'], 0) + 1
 
     list_ = []
     for r in rows:
         latest_call = latest_call_by_id.get(r['sarang_id'])
-        is_dropped = bool(latest_call) and latest_call['label'] in DROPPED_RESULTS
+        is_dropped = bool(latest_call) and latest_call['result'] in DROPPED_RESULTS
         list_.append({
             'sarangId': r['sarang_id'],
             'name': r['name'],
