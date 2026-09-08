@@ -358,8 +358,8 @@ def shed_register(request, *args, **kwargs):
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
     stmts.append({
         'sql': """INSERT INTO SARANG_INFLOW_DETAILS
-                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT)
-                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT
+                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT)
+                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT
                     FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :2""",
         'args': [sarang_id, intake_id],
     })
@@ -396,7 +396,7 @@ def get_shed_prospects(request, *args, **kwargs):
                   s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
-                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.INTRODUCER_NAME, sid.TM_RESERVED_AT,
+                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.INTRODUCER_NAME, sid.HELPER_NAMES, sid.TM_RESERVED_AT,
                   shjy.HAB_JAE_YANG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
              FROM SARANG s
@@ -496,6 +496,7 @@ def get_shed_prospects(request, *args, **kwargs):
                 'location': r['location'],
                 'env': r['env'],
                 'introducerName': r['introducer_name'],
+                'helperNames': r['helper_names'],
                 'tmReservedAt': r['tm_reserved_at'],
             },
             'habJaeYang': {
@@ -622,12 +623,17 @@ def shed_webhook(request, *args, **kwargs):
         introducer = str(body.get('introducer') or '').strip() or None
         tm_location = str(body.get('tmLocation') or '').strip() or None
         tm_datetime = str(body.get('tmDatetime') or '').strip() or None
+        # 유입자 추첨(2명 이상 후보)에서 낙첨된 사람들 — shed 관리자 페이지가 뽑기 후
+        # 낙첨자 이름 배열을 같이 보내줌. 콤마로 합쳐서 저장(INTRODUCER_NAME과 동일 방식).
+        helper_names_list = [str(n).strip() for n in (body.get('helperNames') or []) if str(n).strip()]
+        helper_names = ', '.join(helper_names_list) or None
         affected = DataRouterClient().exec(
             """UPDATE SARANG_INTAKE_QUEUE
                   SET STATUS = 'submitted', ENV = :1, REACTION = :2, INTRODUCER_NAME = :3, LOCATION = :4,
-                      TM_RESERVED_AT = CASE WHEN :5 IS NOT NULL THEN TO_TIMESTAMP(:6, 'YYYY-MM-DD"T"HH24:MI') END
-                WHERE INTAKE_ID = :7 AND STATUS = 'pending'""",
-            [env, reaction, introducer, tm_location, tm_datetime, tm_datetime, intake_id],
+                      HELPER_NAMES = :5,
+                      TM_RESERVED_AT = CASE WHEN :6 IS NOT NULL THEN TO_TIMESTAMP(:7, 'YYYY-MM-DD"T"HH24:MI') END
+                WHERE INTAKE_ID = :8 AND STATUS = 'pending'""",
+            [env, reaction, introducer, tm_location, helper_names, tm_datetime, tm_datetime, intake_id],
         )
         if not affected:
             return JsonResponse({'ok': False, 'message': '대상을 찾을 수 없거나 이미 처리됨'}, status=400)
@@ -686,7 +692,7 @@ def shed_pending_list(request, *args, **kwargs):
 
     rows = DataRouterClient().query(
         """SELECT INTAKE_ID, NAME, PHONE, AGE, MBTI, SOURCE_LINK, REGION_NAME, REACTION,
-                  LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT, CREATED_AT
+                  LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT, CREATED_AT
              FROM SARANG_INTAKE_QUEUE
             WHERE STATUS = 'submitted'
             ORDER BY CREATED_AT ASC"""
@@ -695,6 +701,7 @@ def shed_pending_list(request, *args, **kwargs):
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
+        'helperNames': r['helper_names'],
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})
@@ -709,7 +716,7 @@ def shed_pending_rejected_list(request, *args, **kwargs):
 
     rows = DataRouterClient().query(
         """SELECT INTAKE_ID, NAME, PHONE, AGE, MBTI, SOURCE_LINK, REGION_NAME, REACTION,
-                  LOCATION, ENV, INTRODUCER_NAME, TM_RESERVED_AT, CREATED_AT
+                  LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT, CREATED_AT
              FROM SARANG_INTAKE_QUEUE
             WHERE STATUS = 'rejected'
             ORDER BY REVIEWED_AT DESC"""
@@ -718,6 +725,7 @@ def shed_pending_rejected_list(request, *args, **kwargs):
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
+        'helperNames': r['helper_names'],
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})

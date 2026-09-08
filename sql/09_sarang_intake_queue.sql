@@ -27,6 +27,7 @@ CREATE TABLE SARANG_INTAKE_QUEUE (
   LOCATION              VARCHAR2(100 CHAR),
   ENV                   VARCHAR2(50 CHAR),
   INTRODUCER_NAME       VARCHAR2(100 CHAR),
+  HELPER_NAMES          VARCHAR2(200 CHAR),
   REST_TYPE             VARCHAR2(50 CHAR),
   TM_RESERVED_AT        TIMESTAMP(6) WITH TIME ZONE,
   STATUS                VARCHAR2(15 CHAR)            DEFAULT 'pending' NOT NULL
@@ -46,5 +47,6 @@ COMMENT ON COLUMN SARANG_INTAKE_QUEUE.STATUS      IS 'pending=shed 신청 직후
 COMMENT ON COLUMN SARANG_INTAKE_QUEUE.REST_TYPE   IS '신청 폼에서 고른 휴식 유형 — shed 신청서 자체 필드, SARANG에는 안 넘어감';
 COMMENT ON COLUMN SARANG_INTAKE_QUEUE.ENV             IS '환경 — shed 관리자가 "이관하기" 시 채워넣는 값(신청 시점엔 없음)';
 COMMENT ON COLUMN SARANG_INTAKE_QUEUE.INTRODUCER_NAME IS '유입자 이름 — shed 관리자가 "이관하기" 시 채워넣는 값';
+COMMENT ON COLUMN SARANG_INTAKE_QUEUE.HELPER_NAMES    IS '유입자 추첨(2명 이상 후보)에서 낙첨된 조력자 이름들 — 콤마로 구분';
 
 COMMIT;
