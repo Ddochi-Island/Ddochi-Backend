@@ -587,10 +587,12 @@ def get_shed_prospects(request, *args, **kwargs):
 
     sarang_ids = [r['sarang_id'] for r in rows]
     # 타임라인 맨 마지막(가장 오래된 항목)에 유입 자체를 하나의 로그처럼 넣어줌 —
-    # "누가 유입했는지"가 통화기록보다 먼저(시간상 가장 앞) 보이도록.
+    # "누가 유입했는지"가 통화기록보다 먼저(시간상 가장 앞) 보이도록. INFLOW_MEMBER_NAME은
+    # "이관받기"를 클릭한 Ddochi 담당자라 다른 개념 — 실제 유입자(shed에서 찾은 사람)는
+    # INTRODUCER_NAME이므로 그걸 우선 쓰고, 없을 때만(레거시 데이터 등) 담당자로 대체.
     timeline_by_id = {
         r['sarang_id']: [{'id': f"{r['sarang_id']}-inflow", 'label': '유입', 'category': None, 'source': 'inflow',
-                           'actorName': r['inflow_member_name'], 'createdAt': r['inflow_date']}]
+                           'actorName': r['introducer_name'] or r['inflow_member_name'], 'createdAt': r['inflow_date']}]
         for r in rows
     }
     call_rows = []
