@@ -267,11 +267,38 @@ def submit_result(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def delete_log(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /delete-log 포팅
+    """TM 로그 한 줄 삭제("되돌리기"/개별 로그 × 버튼 공용). 만남픽스(RESULT='MEET_FIX')
+    로그를 지우면 SARANG.STAGE도 그 이전 단계('티엠')로 되돌림 — 안 그러면 로그는
+    없어졌는데 STAGE만 '만픽'에 남아서 화면엔 계속 "종료" 처리된 채로 보이게 됨."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    log_id = str(body.get('id') or '').strip()
+    source = body.get('source') or 'tm'
+    if not sarang_id or not log_id:
+        return JsonResponse({'success': False, 'message': 'rowIndex/id 필요'}, status=400)
+
+    client = DataRouterClient()
+    if source == 'tm':
+        row = client.query_one("SELECT RESULT FROM TM_LOGS WHERE TM_ID = :1 AND SARANG_ID = :2", [log_id, sarang_id])
+        if not row:
+            return JsonResponse({'success': False, 'message': '로그를 찾을 수 없어요'}, status=404)
+        stmts = [{'sql': "DELETE FROM TM_LOGS WHERE TM_ID = :1", 'args': [log_id]}]
+        if row['result'] == 'MEET_FIX':
+            stmts.append({'sql': "UPDATE SARANG SET STAGE = '티엠' WHERE SARANG_ID = :1", 'args': [sarang_id]})
+        client.tx(stmts)
+    else:
+        affected = client.exec(
+            "DELETE FROM SARANG_ACTIVITY_LOGS WHERE ACTIVITY_ID = :1 AND SARANG_ID = :2", [log_id, sarang_id]
+        )
+        if not affected:
+            return JsonResponse({'success': False, 'message': '로그를 찾을 수 없어요'}, status=404)
+
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
