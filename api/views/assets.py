@@ -20,6 +20,32 @@ def _json_body(request):
         return {}
 
 
+def _helper_names_resolver(client, rows, helper_ids_field='helper_member_ids'):
+    """조력자는 콤마 구분 MEMBER_ID 목록으로 저장돼서 단순 JOIN으로는 이름을 못 얻음 —
+    rows에 등장하는 모든 ID를 한 번에 조회한 뒤, 콤마 목록 문자열 하나를 이름 목록
+    문자열로 바꿔주는 함수를 돌려줌."""
+    id_set = set()
+    for r in rows:
+        raw = r.get(helper_ids_field)
+        if raw:
+            id_set.update(x.strip() for x in raw.split(',') if x.strip())
+    name_by_id = {}
+    if id_set:
+        ids = list(id_set)
+        placeholders = ', '.join(f':{i + 1}' for i in range(len(ids)))
+        for hr in client.query(f"SELECT MEMBER_ID, NAME FROM MEMBERS WHERE MEMBER_ID IN ({placeholders})", ids):
+            name_by_id[hr['member_id']] = hr['name']
+
+    def resolve(raw):
+        if not raw:
+            return None
+        names = [name_by_id.get(x.strip()) for x in raw.split(',') if x.strip()]
+        names = [n for n in names if n]
+        return ', '.join(names) or None
+
+    return resolve
+
+
 # Shed 통화/접속 상태 — 원본처럼 DB 없이 프로세스 메모리 dict. 원본과 동일한 제약:
 # 단일 프로세스 전제(멀티 워커면 워커별로 안 나뉨) — 새로운 제약 아님.
 shed_call_state = {}
@@ -358,8 +384,8 @@ def shed_register(request, *args, **kwargs):
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
     stmts.append({
         'sql': """INSERT INTO SARANG_INFLOW_DETAILS
-                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT)
-                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT
+                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT)
+                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT
                     FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :2""",
         'args': [sarang_id, intake_id],
     })
@@ -396,7 +422,8 @@ def get_shed_prospects(request, *args, **kwargs):
                   s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
-                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.INTRODUCER_NAME, sid.HELPER_NAMES, sid.TM_RESERVED_AT,
+                  sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV,
+                  im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS, sid.TM_RESERVED_AT,
                   shjy.HAB_JAE_YANG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
              FROM SARANG s
@@ -405,6 +432,7 @@ def get_shed_prospects(request, *args, **kwargs):
              JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
              LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
              LEFT JOIN SARANG_HAB_JAE_YANG shjy ON shjy.SARANG_ID = s.SARANG_ID AND shjy.IS_ACTIVE = 1
              LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = shjy.GUIDE_MEMBER_ID
              LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = shjy.CALLER_MEMBER_ID
@@ -412,6 +440,8 @@ def get_shed_prospects(request, *args, **kwargs):
             WHERE s.DELETED_AT IS NULL
             ORDER BY s.CREATED_AT DESC""",
     )
+
+    _helper_names = _helper_names_resolver(client, rows)
 
     sarang_ids = [r['sarang_id'] for r in rows]
     # 타임라인 맨 마지막(가장 오래된 항목)에 유입 자체를 하나의 로그처럼 넣어줌 —
@@ -496,7 +526,7 @@ def get_shed_prospects(request, *args, **kwargs):
                 'location': r['location'],
                 'env': r['env'],
                 'introducerName': r['introducer_name'],
-                'helperNames': r['helper_names'],
+                'helperNames': _helper_names(r['helper_member_ids']),
                 'tmReservedAt': r['tm_reserved_at'],
             },
             'habJaeYang': {
@@ -620,20 +650,45 @@ def shed_webhook(request, *args, **kwargs):
             return JsonResponse({'ok': False, 'message': 'rowNum 필요'}, status=400)
         env = str(body.get('env') or '').strip() or None
         reaction = str(body.get('reaction') or '').strip() or None
-        introducer = str(body.get('introducer') or '').strip() or None
         tm_location = str(body.get('tmLocation') or '').strip() or None
         tm_datetime = str(body.get('tmDatetime') or '').strip() or None
-        # 유입자 추첨(2명 이상 후보)에서 낙첨된 사람들 — shed 관리자 페이지가 뽑기 후
-        # 낙첨자 이름 배열을 같이 보내줌. 콤마로 합쳐서 저장(INTRODUCER_NAME과 동일 방식).
-        helper_names_list = [str(n).strip() for n in (body.get('helperNames') or []) if str(n).strip()]
-        helper_names = ', '.join(helper_names_list) or None
-        affected = DataRouterClient().exec(
+
+        client = DataRouterClient()
+
+        def _resolve_member_id(sabun, name):
+            # shed가 사번을 같이 보내면 그대로 쓰고(신규), 없거나 재이관 시 placeholder인
+            # 'existing'이면 이름으로 MEMBERS를 조회해서 구함(구버전 shed 호환 겸용).
+            sabun = str(sabun or '').strip()
+            if sabun and sabun != 'existing':
+                return sabun
+            name = str(name or '').strip()
+            if not name:
+                return None
+            row = client.query_one(
+                "SELECT MEMBER_ID FROM MEMBERS WHERE NAME = :1 AND DELETED_AT IS NULL FETCH FIRST 1 ROWS ONLY",
+                [name],
+            )
+            return row['member_id'] if row else None
+
+        # 유입자/조력자 — 이름 텍스트는 저장 안 하고 MEMBERS.MEMBER_ID만 저장(표시할 땐
+        # 조회 시 MEMBERS 조인). 유입자 추첨(2명 이상 후보)에서 낙첨된 사람들이 조력자.
+        introducer_id = _resolve_member_id(body.get('introducerSabun'), body.get('introducer'))
+        helper_names = body.get('helperNames') or []
+        helper_sabuns = body.get('helperSabuns') or []
+        helper_ids = []
+        for i, name in enumerate(helper_names):
+            mid = _resolve_member_id(helper_sabuns[i] if i < len(helper_sabuns) else None, name)
+            if mid:
+                helper_ids.append(mid)
+        helper_ids_str = ', '.join(helper_ids) or None
+
+        affected = client.exec(
             """UPDATE SARANG_INTAKE_QUEUE
-                  SET STATUS = 'submitted', ENV = :1, REACTION = :2, INTRODUCER_NAME = :3, LOCATION = :4,
-                      HELPER_NAMES = :5,
+                  SET STATUS = 'submitted', ENV = :1, REACTION = :2, INTRODUCER_MEMBER_ID = :3, LOCATION = :4,
+                      HELPER_MEMBER_IDS = :5,
                       TM_RESERVED_AT = CASE WHEN :6 IS NOT NULL THEN TO_TIMESTAMP(:7, 'YYYY-MM-DD"T"HH24:MI') END
                 WHERE INTAKE_ID = :8 AND STATUS = 'pending'""",
-            [env, reaction, introducer, tm_location, helper_names, tm_datetime, tm_datetime, intake_id],
+            [env, reaction, introducer_id, tm_location, helper_ids_str, tm_datetime, tm_datetime, intake_id],
         )
         if not affected:
             return JsonResponse({'ok': False, 'message': '대상을 찾을 수 없거나 이미 처리됨'}, status=400)
@@ -690,18 +745,21 @@ def shed_pending_list(request, *args, **kwargs):
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
-    rows = DataRouterClient().query(
-        """SELECT INTAKE_ID, NAME, PHONE, AGE, MBTI, SOURCE_LINK, REGION_NAME, REACTION,
-                  LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT, CREATED_AT
-             FROM SARANG_INTAKE_QUEUE
-            WHERE STATUS = 'submitted'
-            ORDER BY CREATED_AT ASC"""
+    client = DataRouterClient()
+    rows = client.query(
+        """SELECT q.INTAKE_ID, q.NAME, q.PHONE, q.AGE, q.MBTI, q.SOURCE_LINK, q.REGION_NAME, q.REACTION,
+                  q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
+             FROM SARANG_INTAKE_QUEUE q
+             LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
+            WHERE q.STATUS = 'submitted'
+            ORDER BY q.CREATED_AT ASC"""
     )
+    _helper_names = _helper_names_resolver(client, rows)
     list_ = [{
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
-        'helperNames': r['helper_names'],
+        'helperNames': _helper_names(r['helper_member_ids']),
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})
@@ -714,18 +772,21 @@ def shed_pending_rejected_list(request, *args, **kwargs):
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
-    rows = DataRouterClient().query(
-        """SELECT INTAKE_ID, NAME, PHONE, AGE, MBTI, SOURCE_LINK, REGION_NAME, REACTION,
-                  LOCATION, ENV, INTRODUCER_NAME, HELPER_NAMES, TM_RESERVED_AT, CREATED_AT
-             FROM SARANG_INTAKE_QUEUE
-            WHERE STATUS = 'rejected'
-            ORDER BY REVIEWED_AT DESC"""
+    client = DataRouterClient()
+    rows = client.query(
+        """SELECT q.INTAKE_ID, q.NAME, q.PHONE, q.AGE, q.MBTI, q.SOURCE_LINK, q.REGION_NAME, q.REACTION,
+                  q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
+             FROM SARANG_INTAKE_QUEUE q
+             LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
+            WHERE q.STATUS = 'rejected'
+            ORDER BY q.REVIEWED_AT DESC"""
     )
+    _helper_names = _helper_names_resolver(client, rows)
     list_ = [{
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
-        'helperNames': r['helper_names'],
+        'helperNames': _helper_names(r['helper_member_ids']),
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})
