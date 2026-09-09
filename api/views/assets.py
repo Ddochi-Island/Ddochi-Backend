@@ -46,6 +46,45 @@ def _helper_names_resolver(client, rows, helper_ids_field='helper_member_ids'):
     return resolve
 
 
+def _parse_min_label(label):
+    """합재양 폼의 '과천/센터까지' select 라벨(예: '1시간 10분', '2시간 이상') → 분(int)."""
+    label = str(label or '').strip()
+    if not label or label == '미정':
+        return None
+    if label == '2시간 이상':
+        return 120
+    m = re.match(r'^(?:(\d+)시간\s*)?(?:(\d+)분)?$', label)
+    if not m or not (m.group(1) or m.group(2)):
+        return None
+    return int(m.group(1) or 0) * 60 + int(m.group(2) or 0)
+
+
+def _parse_transfer_label(label):
+    """'0회'~'3회 이상' → int(count)."""
+    label = str(label or '').strip()
+    if label == '3회 이상':
+        return 3
+    m = re.match(r'^(\d+)회$', label)
+    return int(m.group(1)) if m else None
+
+
+def _ox(v):
+    return 1 if str(v or '').strip().upper() == 'O' else 0
+
+
+def _member_id_by_name(client, name):
+    """이름 → MEMBERS.MEMBER_ID. FK로 강제하는 저장(합재양/가챠)에서 이름 입력을
+    안전하게 ID로 바꿀 때 씀 — 못 찾으면 None(호출부가 그 필드만 비우고 나머지는 저장)."""
+    name = str(name or '').strip()
+    if not name:
+        return None
+    row = client.query_one(
+        "SELECT MEMBER_ID FROM MEMBERS WHERE NAME = :1 AND DELETED_AT IS NULL FETCH FIRST 1 ROWS ONLY",
+        [name],
+    )
+    return row['member_id'] if row else None
+
+
 # Shed 통화/접속 상태 — 원본처럼 DB 없이 프로세스 메모리 dict. 원본과 동일한 제약:
 # 단일 프로세스 전제(멀티 워커면 워커별로 안 나뉨) — 새로운 제약 아님.
 shed_call_state = {}
@@ -145,6 +184,82 @@ def submit_result(request, *args, **kwargs):
             "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE) VALUES (:1, :2, :3, :4)",
             [uuid.uuid4().hex.upper(), sarang_id, sabun, ACTIVITY_EVENT[log_type]],
         )
+    elif log_type == '만남픽스':
+        client.tx([
+            {'sql': "INSERT INTO TM_LOGS (TM_ID, SARANG_ID, CALLER_MEMBER_ID, RESULT) VALUES (:1, :2, :3, 'MEET_FIX')",
+             'args': [uuid.uuid4().hex.upper(), sarang_id, sabun]},
+            {'sql': "UPDATE SARANG SET STAGE = '만픽' WHERE SARANG_ID = :1", 'args': [sarang_id]},
+        ])
+    elif log_type == '합재양작성':
+        hj = data.get('habjaeyang') or {}
+        # guide(인도자)는 shed 경로에선 아직 안 정해짐(가챠가 나중에 결정) — 비어있으면 그냥 NULL.
+        guide_id = _member_id_by_name(client, hj.get('guide'))
+        caller_id = _member_id_by_name(client, hj.get('tmName'))
+        mt_date = str(hj.get('mtDate') or '').strip()
+        mt_time = str(hj.get('mtTime') or '').strip()
+        mt_datetime = f'{mt_date}T{mt_time}' if mt_date and mt_time else None
+
+        hj_args_common = [
+            guide_id, caller_id,
+            str(hj.get('path') or '').strip() or None, str(hj.get('tool') or '').strip() or None,
+            _ox(hj.get('verbalManFix')),
+            mt_datetime, mt_datetime, str(hj.get('mtPlace') or '').strip() or None,
+            _parse_min_label(hj.get('gwacheonMin')), _parse_transfer_label(hj.get('gwacheonTransfer')),
+            _parse_min_label(hj.get('centerMin')), _parse_transfer_label(hj.get('centerTransfer')),
+            str(hj.get('job') or '').strip() or None, str(hj.get('sch') or '').strip() or None,
+            str(hj.get('plan') or '').strip() or None, str(hj.get('purpose') or '').strip() or None,
+            str(hj.get('selfImage') or '').strip() or None, str(hj.get('trouble') or '').strip() or None,
+            str(hj.get('att') or '').strip() or None, str(hj.get('wary') or '').strip() or None,
+            str(hj.get('dist') or '').strip() or None,
+            _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
+        ]
+
+        existing = client.query_one(
+            "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+            [sarang_id],
+        )
+        if existing:
+            hj_stmt = {
+                'sql': """UPDATE SARANG_HAB_JAE_YANG
+                             SET GUIDE_MEMBER_ID = :1, CALLER_MEMBER_ID = :2, ROUTE = :3, TOOL = :4, IS_VERBAL_MEET = :5,
+                                 MATCH_SCHEDULED_AT = CASE WHEN :6 IS NOT NULL THEN TO_TIMESTAMP(:7, 'YYYY-MM-DD"T"HH24:MI') END,
+                                 MATCH_LOCATION = :8,
+                                 GWACHEON_TRAVEL_TIME = :9, GWACHEON_TRANSFER_COUNT = :10,
+                                 CENTER_TRAVEL_TIME = :11, CENTER_TRANSFER_COUNT = :12,
+                                 SCHOOL_MAJOR_JOB = :13, SCHEDULE = :14, ENVIRONMENT_1Y = :15, APPLICATION_PURPOSE = :16,
+                                 SELF_IMAGE = :17, DESIRED_IMAGE = :18, CHARACTER_NOTE = :19, ALERT_NOTE = :20, DISTANCE_BURDEN = :21,
+                                 HAS_CENTER_ENV = :22, IS_TAKING_MEDS = :23, HAS_MENTAL_ILLNESS = :24
+                           WHERE HAB_JAE_YANG_ID = :25""",
+                'args': hj_args_common + [existing['hab_jae_yang_id']],
+            }
+        else:
+            hj_stmt = {
+                'sql': """INSERT INTO SARANG_HAB_JAE_YANG
+                            (HAB_JAE_YANG_ID, SARANG_ID, GUIDE_MEMBER_ID, CALLER_MEMBER_ID, ROUTE, TOOL, IS_VERBAL_MEET,
+                             MATCH_SCHEDULED_AT, MATCH_LOCATION,
+                             GWACHEON_TRAVEL_TIME, GWACHEON_TRANSFER_COUNT, CENTER_TRAVEL_TIME, CENTER_TRANSFER_COUNT,
+                             SCHOOL_MAJOR_JOB, SCHEDULE, ENVIRONMENT_1Y, APPLICATION_PURPOSE,
+                             SELF_IMAGE, DESIRED_IMAGE, CHARACTER_NOTE, ALERT_NOTE, DISTANCE_BURDEN,
+                             HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS)
+                          VALUES (:1, :2, :3, :4, :5, :6, :7,
+                                  CASE WHEN :8 IS NOT NULL THEN TO_TIMESTAMP(:9, 'YYYY-MM-DD"T"HH24:MI') END, :10,
+                                  :11, :12, :13, :14,
+                                  :15, :16, :17, :18,
+                                  :19, :20, :21, :22, :23,
+                                  :24, :25, :26)""",
+                'args': [uuid.uuid4().hex.upper(), sarang_id] + hj_args_common,
+            }
+
+        stmts = [
+            hj_stmt,
+            {'sql': "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE) VALUES (:1, :2, :3, '합재양작성')",
+             'args': [uuid.uuid4().hex.upper(), sarang_id, sabun]},
+            {'sql': "UPDATE SARANG SET STAGE = '합재양' WHERE SARANG_ID = :1", 'args': [sarang_id]},
+        ]
+        mbti = str(hj.get('mbti') or '').strip()
+        if mbti:
+            stmts.append({'sql': "UPDATE SARANG SET MBTI = :1 WHERE SARANG_ID = :2", 'args': [mbti, sarang_id]})
+        client.tx(stmts)
     else:
         return JsonResponse({'success': False, 'message': f'아직 지원 안 되는 처리예요: {log_type}'}, status=400)
 
@@ -541,11 +656,38 @@ def get_shed_prospects(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def run_shed_gacha(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /run-shed-gacha 포팅
+    """선한 양치기 인도권 가챠 — 합재양 저장 직후 자동 호출됨. 최소 버전: 확률 없이
+    항상 티엠자가 인도자로 확정(원래는 회차별 60/70/100% 확률로 유입자 vs 티엠자 결정
+    — GACHA_COUNTS 테이블 포함해서 나중에 추가)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('docId') or '').strip()
+    inflow_name = str(body.get('inflowName') or '').strip()
+    tm_name = str(body.get('tmName') or '').strip()
+    if not sarang_id or not inflow_name or not tm_name:
+        return JsonResponse({'success': False, 'message': '필수 값 누락'}, status=400)
+
+    client = DataRouterClient()
+    winner_id = _member_id_by_name(client, tm_name)
+    if not winner_id:
+        return JsonResponse({'success': False, 'message': f'티엠자 이름[{tm_name}]이 명단에 없어!'}, status=400)
+
+    affected = client.exec(
+        "UPDATE SARANG_HAB_JAE_YANG SET GUIDE_MEMBER_ID = :1 WHERE SARANG_ID = :2 AND IS_ACTIVE = 1",
+        [winner_id, sarang_id],
+    )
+    if not affected:
+        return JsonResponse({'success': False, 'message': '합재양을 먼저 저장해줘'}, status=400)
+
+    return JsonResponse({
+        'success': True, 'winner': 'tm', 'winnerName': tm_name,
+        'inflowName': inflow_name, 'tmName': tm_name,
+        'currentRound': 1, 'nextProb': 100,
+    })
 
 
 @csrf_exempt
