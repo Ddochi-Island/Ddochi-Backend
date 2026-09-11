@@ -114,15 +114,15 @@ def get_assets(request, *args, **kwargs):
 
     client = DataRouterClient()
     rows = client.query(
-        """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.MBTI, s.CREATED_AT,
-                  spi.NAME, spi.PHONE,
+        """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.GENDER, s.MBTI, s.CREATED_AT,
+                  spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   im.NAME AS MANAGER_NAME,
                   hj.HAB_JAE_YANG_ID,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
                   hj.MATCH_LOCATION, hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y,
                   hj.APPLICATION_PURPOSE, hj.SELF_IMAGE, hj.DESIRED_IMAGE, hj.CHARACTER_NOTE,
-                  hj.ALERT_NOTE, hj.DISTANCE_BURDEN,
+                  hj.ALERT_NOTE, hj.DISTANCE_BURDEN, hj.QNA, hj.ETC,
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.REJECT_REASON,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
                   COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, hj.TEACHER_MEMBER_ID,
@@ -227,6 +227,8 @@ def get_assets(request, *args, **kwargs):
             'name': r['name'] or '',
             'phone': r['phone'] or '',
             'age': r['age'] or '',
+            'gender': r['gender'] or '',
+            'residence': r['residence_station'] or '',
             'manager': r['manager_name'] or '',
             'teacher': r['teacher_name'] or '',
             'teacherSabun': r['teacher_member_id'] or '',
@@ -241,10 +243,12 @@ def get_assets(request, *args, **kwargs):
                 'subName': r['name'] or '',
                 'guide': r['guide_name'] or '',
                 'tmName': r['caller_name'] or '',
+                'gender': r['gender'] or '',
                 'mtDate': r['mt_date'] or '',
                 'mtTime': r['mt_time'] or '',
                 'mtPlace': r['match_location'] or '',
                 'mbti': r['mbti'] or '',
+                'nearSt': r['residence_station'] or '',
                 'job': r['school_major_job'] or '',
                 'schedule': r['schedule'] or '',
                 'sch': r['schedule'] or '',
@@ -255,7 +259,8 @@ def get_assets(request, *args, **kwargs):
                 'att': r['character_note'] or '',
                 'wary': r['alert_note'] or '',
                 'dist': r['distance_burden'] or '',
-                'etc': '',
+                'qna': r['qna'] or '',
+                'etc': r['etc'] or '',
                 'replied': r['has_replied'] == '1',
                 'windowOpened': r['is_window_opened'] == '1',
             } if has_hj else {},
@@ -316,9 +321,10 @@ _RESULT_SUB_REASON_MAP = {
 @csrf_exempt
 @require_jwt
 def update_match(request, *args, **kwargs):
-    """매칭 결과 입력(취소/비합/탈락/상담따기) — MatchResultPopup 6옵션 중 밀림/2차만남은
-    /api/postpone-meeting으로 따로 감. 따기보고(type='ttagi')는 저장할 테이블이 아직
-    없어 미구현 — habjaeyang/teacher 타입도 이 화면에선 안 씀(edit-match가 담당)."""
+    """매칭 화면의 다목적 업데이트 — type='status'는 결과입력(취소/비합/탈락/상담따기,
+    MatchResultPopup 6옵션 중 밀림/2차만남은 /api/postpone-meeting으로 따로 감),
+    type='habjaeyang'은 합재양 보기 팝업의 인라인 필드 편집(editHjField). 따기보고
+    (type='ttagi')는 저장할 테이블이 아직 없어 미구현."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -328,6 +334,50 @@ def update_match(request, *args, **kwargs):
     data = body.get('data') or {}
     if not sarang_id:
         return JsonResponse({'success': False, 'message': 'rowIndex 필요'}, status=400)
+
+    client = DataRouterClient()
+
+    if edit_type == 'habjaeyang':
+        hj = client.query_one(
+            "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+            [sarang_id],
+        )
+        if not hj:
+            return JsonResponse({'success': False, 'message': '활성 합재양이 없어요'}, status=404)
+
+        guide_name = str(data.get('guide') or '').strip()
+        guide_id = None
+        if guide_name:
+            guide_id = _member_id_by_name(client, guide_name)
+            if not guide_id:
+                return JsonResponse({'success': False, 'message': f'인도자 [{guide_name}]이(가) 명단에 없어!'})
+        tm_name = str(data.get('tmName') or '').strip()
+        caller_id = None
+        if tm_name:
+            caller_id = _member_id_by_name(client, tm_name)
+            if not caller_id:
+                return JsonResponse({'success': False, 'message': f'티엠자 [{tm_name}]이(가) 명단에 없어!'})
+
+        client.exec(
+            """UPDATE SARANG_HAB_JAE_YANG
+                 SET GUIDE_MEMBER_ID = COALESCE(:1, GUIDE_MEMBER_ID), CALLER_MEMBER_ID = COALESCE(:2, CALLER_MEMBER_ID),
+                     SCHOOL_MAJOR_JOB = :3, SCHEDULE = :4, ENVIRONMENT_1Y = :5, APPLICATION_PURPOSE = :6,
+                     DESIRED_IMAGE = :7, CHARACTER_NOTE = :8, ALERT_NOTE = :9, DISTANCE_BURDEN = :10,
+                     QNA = :11, ETC = :12
+               WHERE HAB_JAE_YANG_ID = :13""",
+            [guide_id, caller_id,
+             str(data.get('job') or '').strip() or None, str(data.get('schedule') or data.get('sch') or '').strip() or None,
+             str(data.get('plan') or '').strip() or None, str(data.get('purpose') or '').strip() or None,
+             str(data.get('trouble') or '').strip() or None, str(data.get('att') or '').strip() or None,
+             str(data.get('wary') or '').strip() or None, str(data.get('dist') or '').strip() or None,
+             str(data.get('qna') or '').strip() or None, str(data.get('etc') or '').strip() or None,
+             hj['hab_jae_yang_id']],
+        )
+        mbti = str(data.get('mbti') or '').strip()
+        if mbti:
+            client.exec("UPDATE SARANG SET MBTI = :1 WHERE SARANG_ID = :2", [mbti, sarang_id])
+        return JsonResponse({'success': True, 'message': '반영 완료!'})
+
     if edit_type != 'status':
         return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'}, status=400)
 
@@ -345,7 +395,6 @@ def update_match(request, *args, **kwargs):
     if not result_val:
         return JsonResponse({'success': False, 'message': f'알 수 없는 결과: {match_result}'}, status=400)
 
-    client = DataRouterClient()
     cur = client.query_one(
         """SELECT MATCH_ID FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
             ORDER BY MATCH_DEGREE DESC, ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
@@ -430,6 +479,7 @@ def submit_result(request, *args, **kwargs):
             str(hj.get('selfImage') or '').strip() or None, str(hj.get('trouble') or '').strip() or None,
             str(hj.get('att') or '').strip() or None, str(hj.get('wary') or '').strip() or None,
             str(hj.get('dist') or '').strip() or None,
+            str(hj.get('qna') or '').strip() or None, str(hj.get('etc') or '').strip() or None,
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ]
 
@@ -447,8 +497,9 @@ def submit_result(request, *args, **kwargs):
                                  CENTER_TRAVEL_TIME = :11, CENTER_TRANSFER_COUNT = :12,
                                  SCHOOL_MAJOR_JOB = :13, SCHEDULE = :14, ENVIRONMENT_1Y = :15, APPLICATION_PURPOSE = :16,
                                  SELF_IMAGE = :17, DESIRED_IMAGE = :18, CHARACTER_NOTE = :19, ALERT_NOTE = :20, DISTANCE_BURDEN = :21,
-                                 HAS_CENTER_ENV = :22, IS_TAKING_MEDS = :23, HAS_MENTAL_ILLNESS = :24
-                           WHERE HAB_JAE_YANG_ID = :25""",
+                                 QNA = :22, ETC = :23,
+                                 HAS_CENTER_ENV = :24, IS_TAKING_MEDS = :25, HAS_MENTAL_ILLNESS = :26
+                           WHERE HAB_JAE_YANG_ID = :27""",
                 'args': hj_args_common + [existing['hab_jae_yang_id']],
             }
         else:
@@ -459,13 +510,14 @@ def submit_result(request, *args, **kwargs):
                              GWACHEON_TRAVEL_TIME, GWACHEON_TRANSFER_COUNT, CENTER_TRAVEL_TIME, CENTER_TRANSFER_COUNT,
                              SCHOOL_MAJOR_JOB, SCHEDULE, ENVIRONMENT_1Y, APPLICATION_PURPOSE,
                              SELF_IMAGE, DESIRED_IMAGE, CHARACTER_NOTE, ALERT_NOTE, DISTANCE_BURDEN,
+                             QNA, ETC,
                              HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS)
                           VALUES (:1, :2, :3, :4, :5, :6, :7,
                                   CASE WHEN :8 IS NOT NULL THEN TO_TIMESTAMP(:9, 'YYYY-MM-DD"T"HH24:MI') END, :10,
                                   :11, :12, :13, :14,
                                   :15, :16, :17, :18,
                                   :19, :20, :21, :22, :23,
-                                  :24, :25, :26)""",
+                                  :24, :25, :26, :27, :28)""",
                 'args': [uuid.uuid4().hex.upper(), sarang_id] + hj_args_common,
             }
 
@@ -478,6 +530,16 @@ def submit_result(request, *args, **kwargs):
         mbti = str(hj.get('mbti') or '').strip()
         if mbti:
             stmts.append({'sql': "UPDATE SARANG SET MBTI = :1 WHERE SARANG_ID = :2", 'args': [mbti, sarang_id]})
+        gender = str(hj.get('gender') or '').strip()
+        if gender:
+            stmts.append({'sql': "UPDATE SARANG SET GENDER = :1 WHERE SARANG_ID = :2", 'args': [gender, sarang_id]})
+        near_st = str(hj.get('nearSt') or '').strip()
+        if near_st:
+            stmts.append({
+                'sql': """UPDATE SARANG_PERSONAL_INFO SET RESIDENCE_STATION = :1
+                           WHERE PERSONAL_INFO_ID = (SELECT PERSONAL_INFO_ID FROM SARANG WHERE SARANG_ID = :2)""",
+                'args': [near_st, sarang_id],
+            })
         client.tx(stmts)
     else:
         return JsonResponse({'success': False, 'message': f'아직 지원 안 되는 처리예요: {log_type}'}, status=400)
@@ -622,6 +684,24 @@ def edit_match(request, *args, **kwargs):
                 "UPDATE SARANG_HAB_JAE_YANG SET GUIDE_MEMBER_ID = :1 WHERE HAB_JAE_YANG_ID = :2",
                 [guide_id, hj_id],
             )
+    elif edit_type == 'gender':
+        client.exec("UPDATE SARANG SET GENDER = :1 WHERE SARANG_ID = :2", [str(value or '').strip() or None, sarang_id])
+    elif edit_type == 'age':
+        client.exec("UPDATE SARANG SET AGE = :1 WHERE SARANG_ID = :2", [str(value or '').strip() or None, sarang_id])
+    elif edit_type == 'residence':
+        client.exec(
+            """UPDATE SARANG_PERSONAL_INFO SET RESIDENCE_STATION = :1
+                WHERE PERSONAL_INFO_ID = (SELECT PERSONAL_INFO_ID FROM SARANG WHERE SARANG_ID = :2)""",
+            [str(value or '').strip() or None, sarang_id],
+        )
+    elif edit_type == 'phone':
+        phone = str(value or '').strip()
+        phone_digits = re.sub(r'\D', '', phone)
+        client.exec(
+            """UPDATE SARANG_PERSONAL_INFO SET PHONE = :1, PHONE_NORMALIZED = :2
+                WHERE PERSONAL_INFO_ID = (SELECT PERSONAL_INFO_ID FROM SARANG WHERE SARANG_ID = :3)""",
+            [phone, phone_digits, sarang_id],
+        )
     else:
         return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'})
 

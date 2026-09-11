@@ -43,6 +43,7 @@ CREATE TABLE SARANG (
   PERSONAL_INFO_ID    VARCHAR2(64 CHAR)            NOT NULL,
   INFLOW_MEMBER_ID    VARCHAR2(50 CHAR)            NOT NULL,
   AGE                 NUMBER(3),
+  GENDER              VARCHAR2(10 CHAR)            CHECK (GENDER IN ('남','여')),
   MBTI                VARCHAR2(10 CHAR),
   STAGE               VARCHAR2(30 CHAR)            NOT NULL CHECK (STAGE IN (
                         '유입','티엠','만픽','합재양','재가','매칭','상따','성홀','성따','복방','센'
@@ -68,6 +69,7 @@ CREATE INDEX IX_SARANG_PI      ON SARANG (PERSONAL_INFO_ID);
 COMMENT ON TABLE  SARANG               IS '사랑이(대상자) 메인 테이블. PROSPECTS 대체';
 COMMENT ON COLUMN SARANG.STAGE           IS '퍼널 진행 단계 — 스펙 원안 그대로';
 COMMENT ON COLUMN SARANG.CURRENT_PROCESS IS '현재 진행 세부 단계 — 스펙 원안 그대로. 합재양 이후에만 의미 있어서 그 전엔 NULL';
+COMMENT ON COLUMN SARANG.GENDER IS '성별 — 합재양 작성 폼(hjFields.gender)에서 옴';
 
 CREATE TABLE SARANG_INFLOW_DETAILS (
   SARANG_ID        VARCHAR2(50 CHAR)            PRIMARY KEY,
@@ -151,6 +153,8 @@ CREATE TABLE SARANG_HAB_JAE_YANG (
   CHARACTER_NOTE        VARCHAR2(255 CHAR),
   ALERT_NOTE            VARCHAR2(255 CHAR),
   DISTANCE_BURDEN       VARCHAR2(255 CHAR),
+  QNA                   VARCHAR2(1000 CHAR),
+  ETC                   VARCHAR2(255 CHAR),
   HAS_CENTER_ENV        NUMBER(1)                    DEFAULT 0 NOT NULL CHECK (HAS_CENTER_ENV IN (0,1)),
   IS_TAKING_MEDS        NUMBER(1)                    DEFAULT 0 NOT NULL CHECK (IS_TAKING_MEDS IN (0,1)),
   HAS_MENTAL_ILLNESS    NUMBER(1)                    DEFAULT 0 NOT NULL CHECK (HAS_MENTAL_ILLNESS IN (0,1)),
@@ -178,6 +182,8 @@ COMMENT ON TABLE SARANG_HAB_JAE_YANG IS '합재양(매칭/상담 후 신상·환
 COMMENT ON COLUMN SARANG_HAB_JAE_YANG.APPROVAL_STATUS IS '합재양 재가 상태 — pending(대기)/approved(재가)/rejected(반려). 승인 시 SARANG.STAGE도 합재양→재가로 전환';
 COMMENT ON COLUMN SARANG_HAB_JAE_YANG.REJECT_REASON    IS '반려 사유(자유 텍스트) — status=rejected일 때만 의미 있음';
 COMMENT ON COLUMN SARANG_HAB_JAE_YANG.TEACHER_NAME_OVERRIDE IS '타지역 교사처럼 MEMBERS에 없는 이름 저장용 — TEACHER_MEMBER_ID 없을 때만 씀';
+COMMENT ON COLUMN SARANG_HAB_JAE_YANG.QNA IS '내면질문(최대한 상세) — 초기 작성 폼엔 입력란 없고 합재양 보기 팝업 인라인 편집으로만 채워짐';
+COMMENT ON COLUMN SARANG_HAB_JAE_YANG.ETC IS '특이사항 — hjFields.etc';
 
 CREATE TABLE SARANG_MATCH_HISTORIES (
   MATCH_ID          VARCHAR2(50 CHAR)            PRIMARY KEY,
