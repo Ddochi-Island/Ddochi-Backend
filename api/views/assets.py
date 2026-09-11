@@ -720,11 +720,46 @@ def run_shed_gacha(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def cancel_shed_habjaeyang(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /cancel-shed-habjaeyang 포팅
+    """합재양 제출 취소 — services/main/src/routes/assets.js 포팅(텔레그램 메시지 삭제·
+    매칭전광판 갱신은 이 프로젝트에 아직 없는 기능이라 제외). 만남픽스 통화 로그와
+    합재양작성 활동 로그를 지우고 합재양은 하드 삭제 대신 IS_ACTIVE=0으로 비활성화한 뒤
+    STAGE를 '티엠'으로 되돌림 — delete_log가 MEET_FIX 로그 하나 지울 때의 원복 규칙과 동일."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('docId') or '').strip()
+    if not sarang_id:
+        return JsonResponse({'success': False, 'message': '필수 값 누락'}, status=400)
+
+    client = DataRouterClient()
+    hj = client.query_one(
+        "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+        [sarang_id],
+    )
+    if not hj:
+        return JsonResponse({'success': False, 'message': '취소할 합재양을 찾을 수 없어요'}, status=404)
+
+    meet_fix_log = client.query_one(
+        "SELECT TM_ID FROM TM_LOGS WHERE SARANG_ID = :1 AND RESULT = 'MEET_FIX' ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY",
+        [sarang_id],
+    )
+    activity_log = client.query_one(
+        "SELECT ACTIVITY_ID FROM SARANG_ACTIVITY_LOGS WHERE SARANG_ID = :1 AND EVENT_TYPE = '합재양작성' ORDER BY CREATED_AT DESC FETCH FIRST 1 ROWS ONLY",
+        [sarang_id],
+    )
+
+    stmts = [{'sql': "UPDATE SARANG_HAB_JAE_YANG SET IS_ACTIVE = 0 WHERE HAB_JAE_YANG_ID = :1", 'args': [hj['hab_jae_yang_id']]}]
+    if meet_fix_log:
+        stmts.append({'sql': "DELETE FROM TM_LOGS WHERE TM_ID = :1", 'args': [meet_fix_log['tm_id']]})
+    if activity_log:
+        stmts.append({'sql': "DELETE FROM SARANG_ACTIVITY_LOGS WHERE ACTIVITY_ID = :1", 'args': [activity_log['activity_id']]})
+    stmts.append({'sql': "UPDATE SARANG SET STAGE = '티엠' WHERE SARANG_ID = :1", 'args': [sarang_id]})
+    client.tx(stmts)
+
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
