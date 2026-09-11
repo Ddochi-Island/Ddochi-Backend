@@ -126,7 +126,7 @@ def get_assets(request, *args, **kwargs):
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.REJECT_REASON,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
                   COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, hj.TEACHER_MEMBER_ID,
-                  CASE WHEN sid.SARANG_ID IS NOT NULL THEN 1 ELSE 0 END AS IS_SHED
+                  sid.SOURCE_LINK
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN MEMBERS im ON im.MEMBER_ID = s.INFLOW_MEMBER_ID
@@ -230,8 +230,9 @@ def get_assets(request, *args, **kwargs):
             'manager': r['manager_name'] or '',
             'teacher': r['teacher_name'] or '',
             'teacherSabun': r['teacher_member_id'] or '',
-            # isShed 판정용 — MatchingScreen.vue가 path.startsWith('shed_')로 체크.
-            'path': 'shed_1' if r['is_shed'] == '1' else '',
+            # isShed 판정용(MatchingScreen.vue가 path.startsWith('shed_')로 체크) 겸
+            # 실제 유입 링크 번호 표시 — SOURCE_LINK가 없으면(레거시/shed 아닌 유입) 빈 값.
+            'path': f"shed_{r['source_link']}" if r['source_link'] else '',
             'tmResultDetail': '만남픽스',
             'matchResultDetail': match_result_detail,
             'approvalStatus': _APPROVAL_KO.get(r['approval_status'], '') if has_hj else '',
@@ -881,8 +882,8 @@ def shed_register(request, *args, **kwargs):
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
     stmts.append({
         'sql': """INSERT INTO SARANG_INFLOW_DETAILS
-                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT)
-                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT
+                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT, SOURCE_LINK)
+                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT, SOURCE_LINK
                     FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :2""",
         'args': [sarang_id, intake_id],
     })
