@@ -201,10 +201,21 @@ def get_assets(request, *args, **kwargs):
     match_by_id = {}
     for r in match_rows:
         match_by_id.setdefault(r['sarang_id'], []).append(r)
-        if r['result']:
+
+    # 밀림/2차만남 로그는 "다음엔 언제로 잡혔는지"를 오른쪽에 같이 보여줌(미정이면
+    # 미정으로) — 같은 SARANG_ID 안에서 바로 다음 차수 행의 날짜를 봐야 해서
+    # match_by_id가 다 채워진 뒤 2패스로 돎.
+    for sid, hist_rows in match_by_id.items():
+        for i, r in enumerate(hist_rows):
+            if not r['result']:
+                continue
             detail = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason_label'] or r['result_label']}"
+            if r['result'] in ('DELAY', 'SECOND_MEET'):
+                nxt = hist_rows[i + 1] if i + 1 < len(hist_rows) else None
+                if nxt:
+                    detail += f" ({nxt['mt_date'] or '미정'})"
             line = f"{r['created_ts']} | 매칭결과 | {detail} | "
-            logs_by_id.setdefault(r['sarang_id'], []).append({'id': r['match_id'], 'source': 'match', 'text': line, 'sort_ts': r['sort_ts']})
+            logs_by_id.setdefault(sid, []).append({'id': r['match_id'], 'source': 'match', 'text': line, 'sort_ts': r['sort_ts']})
     for sid in logs_by_id:
         logs_by_id[sid].sort(key=lambda x: x['sort_ts'], reverse=True)
 
