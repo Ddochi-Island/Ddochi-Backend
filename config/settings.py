@@ -49,11 +49,20 @@ JWT_SECRET = config('JWT_SECRET')
 JWT_ACCESS_TTL = config('JWT_ACCESS_TTL', default='15m')
 JWT_REFRESH_TTL = config('JWT_REFRESH_TTL', default='30d')
 
-# 사명의 길 비밀번호 (admin-unlock 라우트 포팅 전까지는 미사용).
+# 사명의 길 비밀번호 (admin-unlock 라우트에서 검사).
 ADMIN_PASSWORD = config('ADMIN_PASSWORD', default='1440')
 
 # AUTH_CONFIGS / ROLES 조회 시 쓰는 지역 — prod 시드 데이터가 'college' 기준.
 REGION_ID = config('REGION_ID', default='college')
+
+# tel_router(별도 서비스, 텔레그램 봇 웹훅 처리)가 /internal/telegram/pair-complete를
+# 호출할 때 붙이는 Bearer 토큰 — tel_router 쪽 설정과 반드시 같은 값이어야 함.
+TELEGRAM_INTERNAL_TOKEN = config('TELEGRAM_INTERNAL_TOKEN', default='')
+# 그룹챗 슬래시 명령이 봇에 도달하려면(Privacy Mode ON) "/pair@bot_username CODE" 형태가
+# 필요 — 미설정 시 "/pair CODE"로 폴백(운영자가 Privacy Mode OFF 해야 도달).
+TELEGRAM_BOT_USERNAME = config('TELEGRAM_BOT_USERNAME', default='')
+# 채널 연결 완료 환영 메시지의 딥링크 버튼(예: "매칭 절대지켜! 🛡️")에 붙는 베이스 URL.
+MY_TELEGRAM_LINK = config('MY_TELEGRAM_LINK', default='')
 
 # Application definition
 

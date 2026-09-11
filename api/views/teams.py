@@ -7,6 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import require_jwt
 from api.clients.data_router import DataRouterClient
+from api.telegram.team_config import load_all_team_configs
 
 
 def _json_body(request):
@@ -19,9 +20,10 @@ def _json_body(request):
 @csrf_exempt
 @require_jwt
 def get_teams(request, *args, **kwargs):
-    """섭외도구/경로 관리 화면의 팀 탭 + 팀 선택 드롭다운용. 이 프로젝트엔 TEAMS
-    테이블이 없어서(REGIONS/TEAMS/AREAS 생략) MEMBER_AFFILIATION_HISTORIES에 실제
-    쓰이고 있는 REGION_CODE 값들을 팀 코드로 그대로 씀 — DISPLAY_NAME 개념 없음."""
+    """섭외도구/경로 관리 화면의 팀 탭 + 팀 선택 드롭다운 + 텔레그램 연결 화면의
+    팀별 채널 설정(configs) 소스. 이 프로젝트엔 TEAMS 테이블이 없어서(REGIONS/
+    TEAMS/AREAS 생략) MEMBER_AFFILIATION_HISTORIES에 실제 쓰이고 있는 REGION_CODE
+    값들을 팀 코드로 그대로 씀 — DISPLAY_NAME 개념 없음."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -32,10 +34,12 @@ def get_teams(request, *args, **kwargs):
             ORDER BY REGION_CODE"""
     )
     codes = [r['region_code'] for r in rows]
+    all_configs = load_all_team_configs(client, codes)
     return JsonResponse({
         'success': True,
         'list': codes,
         'teams': [{'id': c, 'name': c} for c in codes],
+        'configs': {c: all_configs.get(c, {}) for c in codes},
     })
 
 
