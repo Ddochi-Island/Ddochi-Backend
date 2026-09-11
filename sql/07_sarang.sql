@@ -116,7 +116,7 @@ CREATE TABLE SARANG_ACTIVITY_LOGS (
   SARANG_ID         VARCHAR2(50 CHAR)            NOT NULL,
   ACTOR_MEMBER_ID   VARCHAR2(50 CHAR)            NOT NULL,
   EVENT_TYPE        VARCHAR2(30 CHAR)            NOT NULL CHECK (EVENT_TYPE IN (
-                      '선문자발송','부재중문자발송','합재양작성','재가처리','반려처리'
+                      '선문자발송','부재중문자발송','합재양작성','재가처리','반려처리','밀림처리','2차만남'
                     )),
   CONTENT           CLOB,
   CREATED_AT        TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
@@ -191,7 +191,7 @@ CREATE TABLE SARANG_MATCH_HISTORIES (
   TEACHER_MEMBER_ID VARCHAR2(50 CHAR),
   MATCH_DEGREE      NUMBER(3)                    DEFAULT 1 NOT NULL,
   ATTEMPT_COUNT     NUMBER(3)                    DEFAULT 1 NOT NULL,
-  MATCHED_AT        TIMESTAMP(6) WITH TIME ZONE  NOT NULL,
+  MATCHED_AT        TIMESTAMP(6) WITH TIME ZONE,
   MATCH_LOCATION    VARCHAR2(100 CHAR),
   STATUS            VARCHAR2(30 CHAR)            NOT NULL CHECK (STATUS IN ('SCHEDULED','DELAYED','IN_PROGRESS','FINISHED')),
   RESULT            VARCHAR2(30 CHAR)            CHECK (RESULT IN ('취소','밀림','비합','탈락','2차 만남','상담 따기')),
@@ -205,5 +205,6 @@ CREATE INDEX IX_SMH_SARANG_DEGREE ON SARANG_MATCH_HISTORIES (SARANG_ID, MATCH_DE
 
 COMMENT ON TABLE  SARANG_MATCH_HISTORIES        IS '교사 매칭 차수별 결과·밀림 이력. append-only — 밀릴 때마다 새 행 INSERT(ATTEMPT_COUNT 증가), UPDATE로 덮어쓰지 않음';
 COMMENT ON COLUMN SARANG_MATCH_HISTORIES.ATTEMPT_COUNT IS '차수 내 시도 횟수. 이전 시도 행은 그대로 두고 새 행을 추가하는 방식으로 이력 보존';
+COMMENT ON COLUMN SARANG_MATCH_HISTORIES.MATCHED_AT IS '이 차수 만남 예정 일시 — NULL이면 "날짜 미정"(밀림/2차만남 처리 시 새 날짜를 아직 안 정한 경우)';
 
 COMMIT;

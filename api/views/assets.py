@@ -219,7 +219,7 @@ def get_assets(request, *args, **kwargs):
 
         meetings = [{
             'meetingId': m['match_id'],
-            'date': m['mt_date'] or '',
+            'date': m['mt_date'] or '미정',
             'time': m['mt_time'] or '',
             'place': m['match_location'] or '',
             'outcome': (f"{_MATCH_RESULT_ICON.get(m['result'], '')}{m['sub_reason_label'] or m['result_label']}") if m['result'] else None,
@@ -251,9 +251,11 @@ def get_assets(request, *args, **kwargs):
                 'guide': r['guide_name'] or '',
                 'tmName': r['caller_name'] or '',
                 'gender': r['gender'] or '',
-                'mtDate': r['mt_date'] or '',
-                'mtTime': r['mt_time'] or '',
-                'mtPlace': r['match_location'] or '',
+                # 재가 이후엔 SARANG_MATCH_HISTORIES의 최신 시도(밀림/2차만남으로 갱신된
+                # 최신 일정)가 있으면 그걸 우선 — 없으면(재가 전) 합재양 최초 일정.
+                'mtDate': (latest['mt_date'] or '미정') if latest else (r['mt_date'] or ''),
+                'mtTime': (latest['mt_time'] or '') if latest else (r['mt_time'] or ''),
+                'mtPlace': (latest['match_location'] or '') if latest else (r['match_location'] or ''),
                 'mbti': r['mbti'] or '',
                 'nearSt': r['residence_station'] or '',
                 'job': r['school_major_job'] or '',
@@ -770,11 +772,65 @@ def update_approval(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def postpone_meeting(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /postpone-meeting 포팅
+    """결과입력의 밀림/2차만남 처리 — 현재 열린(RESULT IS NULL) 매칭 시도를 마무리하고
+    새 시도 행을 추가. SARANG_MATCH_HISTORIES는 append-only라 밀림은 같은 차수 안에서
+    ATTEMPT_COUNT+1, 2차만남은 새 차수(MATCH_DEGREE+1)로 넘어감(테이블 자체 설계).
+    날짜를 아직 안 정했으면('미정' 체크) MATCHED_AT을 NULL로 둬서 프론트가 '미정'
+    그룹으로 묶게 함."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    log_type = str(body.get('logType') or '')
+    new_date = str(body.get('newDate') or '').strip()
+    reason = str(body.get('logContent') or '').strip()
+    if not sarang_id or log_type not in ('밀림처리', '2차만남'):
+        return JsonResponse({'success': False, 'message': 'rowIndex/logType 필요'}, status=400)
+
+    result_code = 'DELAY' if log_type == '밀림처리' else 'SECOND_MEET'
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    cur = client.query_one(
+        """SELECT MATCH_ID, MATCH_DEGREE, ATTEMPT_COUNT, TEACHER_MEMBER_ID, MATCH_LOCATION
+             FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
+            ORDER BY MATCH_DEGREE DESC, ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
+        [sarang_id],
+    )
+    if not cur:
+        return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
+
+    if log_type == '밀림처리':
+        next_degree, next_attempt = int(cur['match_degree']), int(cur['attempt_count']) + 1
+    else:
+        next_degree, next_attempt = int(cur['match_degree']) + 1, 1
+
+    stmts = [
+        {'sql': "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, STATUS = 'FINISHED' WHERE MATCH_ID = :2",
+         'args': [result_code, cur['match_id']]},
+        {'sql': "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE, CONTENT) VALUES (:1, :2, :3, :4, :5)",
+         'args': [uuid.uuid4().hex.upper(), sarang_id, sabun, log_type, reason or None]},
+    ]
+    if new_date and new_date != '미정':
+        dt = new_date.replace('T', ' ')[:16]
+        stmts.append({
+            'sql': """INSERT INTO SARANG_MATCH_HISTORIES
+                        (MATCH_ID, SARANG_ID, MATCH_DEGREE, ATTEMPT_COUNT, MATCHED_AT, MATCH_LOCATION, TEACHER_MEMBER_ID, STATUS)
+                      VALUES (:1, :2, :3, :4, TO_TIMESTAMP(:5, 'YYYY-MM-DD HH24:MI'), :6, :7, 'SCHEDULED')""",
+            'args': [uuid.uuid4().hex.upper(), sarang_id, next_degree, next_attempt, dt, cur['match_location'], cur['teacher_member_id']],
+        })
+    else:
+        stmts.append({
+            'sql': """INSERT INTO SARANG_MATCH_HISTORIES
+                        (MATCH_ID, SARANG_ID, MATCH_DEGREE, ATTEMPT_COUNT, MATCHED_AT, MATCH_LOCATION, TEACHER_MEMBER_ID, STATUS)
+                      VALUES (:1, :2, :3, :4, NULL, :5, :6, 'SCHEDULED')""",
+            'args': [uuid.uuid4().hex.upper(), sarang_id, next_degree, next_attempt, cur['match_location'], cur['teacher_member_id']],
+        })
+    client.tx(stmts)
+    return JsonResponse({'success': True, 'message': f'{log_type} 처리 완료!'})
 
 
 @csrf_exempt
