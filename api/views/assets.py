@@ -297,11 +297,69 @@ def get_assets(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def get_matching_history(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /get-matching-history 포팅
+    """매칭 절대 지켜!의 "📋 히스토리" 화면 — 날짜 범위로 매칭 시도(SARANG_MATCH_HISTORIES)를
+    조회. 내 팀(담당자 소속팀) 것만 — 히스토리는 기간이 넓어서 get-assets(90일/전체)와
+    달리 팀으로 좁힘(레거시 정합)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    start_date = str(body.get('startDate') or '').strip()
+    end_date = str(body.get('endDate') or '').strip()
+    if not start_date or not end_date:
+        return JsonResponse({'success': False, 'meetings': [], 'message': '날짜 범위 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+    ctx = get_author_context(sabun)
+    team_id = ctx['team_id']
+
+    rows = client.query(
+        """SELECT smh.MATCH_ID, s.SARANG_ID,
+                  TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE,
+                  TO_CHAR(smh.MATCHED_AT, 'HH24:MI') AS MT_TIME,
+                  smh.MATCH_LOCATION, smh.RESULT, mrc.LABEL AS RESULT_LABEL, msrc.LABEL AS SUB_REASON_LABEL,
+                  spi.NAME, im.NAME AS MANAGER_NAME, gm.NAME AS GUIDE_NAME,
+                  COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME,
+                  hj.APPROVAL_STATUS
+             FROM SARANG_MATCH_HISTORIES smh
+             JOIN SARANG s ON s.SARANG_ID = smh.SARANG_ID
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN MEMBERS im ON im.MEMBER_ID = s.INFLOW_MEMBER_ID
+             JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+             LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+             LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = hj.GUIDE_MEMBER_ID
+             LEFT JOIN MEMBERS tcm ON tcm.MEMBER_ID = hj.TEACHER_MEMBER_ID
+             LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = smh.RESULT
+             LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
+            WHERE mah.REGION_CODE = :1
+              AND smh.MATCHED_AT >= TO_DATE(:2, 'YYYY-MM-DD')
+              AND smh.MATCHED_AT <  TO_DATE(:3, 'YYYY-MM-DD') + 1
+            ORDER BY smh.MATCHED_AT""",
+        [team_id, start_date, end_date],
+    )
+
+    meetings = []
+    for r in rows:
+        outcome = ''
+        if r['result']:
+            outcome = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason_label'] or r['result_label']}"
+        meetings.append({
+            'meetingId': r['match_id'],
+            'date': r['mt_date'] or '',
+            'time': r['mt_time'] or '',
+            'outcome': outcome,
+            'place': r['match_location'] or '',
+            'docId': r['sarang_id'],
+            'name': r['name'] or '',
+            'manager': r['manager_name'] or '',
+            'guide': r['guide_name'] or '',
+            'teacher': r['teacher_name'] or '',
+            'approvalStatus': _APPROVAL_KO.get(r['approval_status'], ''),
+        })
+    return JsonResponse({'success': True, 'meetings': meetings})
 
 
 @csrf_exempt
