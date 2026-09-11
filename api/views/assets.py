@@ -671,11 +671,26 @@ def edit_match(request, *args, **kwargs):
             [teacher_id, override, hj_id],
         )
     elif edit_type == 'date':
+        # get-assets는 재가 이후(SARANG_MATCH_HISTORIES 행이 생긴 뒤)엔 표시 날짜를
+        # 그 최신 시도 행에서 가져옴 — SARANG_HAB_JAE_YANG.MATCH_SCHEDULED_AT만 고치면
+        # 화면엔 반영 안 됨. 열린(RESULT IS NULL) 시도가 있으면 그걸, 없으면(재가 전)
+        # 합재양의 최초 일정을 고침.
         dt = str(value or '').replace('T', ' ')[:16]
-        client.exec(
-            "UPDATE SARANG_HAB_JAE_YANG SET MATCH_SCHEDULED_AT = TO_TIMESTAMP(:1, 'YYYY-MM-DD HH24:MI') WHERE HAB_JAE_YANG_ID = :2",
-            [dt, hj_id],
+        open_match = client.query_one(
+            """SELECT MATCH_ID FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
+                ORDER BY MATCH_DEGREE DESC, ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
+            [sarang_id],
         )
+        if open_match:
+            client.exec(
+                "UPDATE SARANG_MATCH_HISTORIES SET MATCHED_AT = TO_TIMESTAMP(:1, 'YYYY-MM-DD HH24:MI') WHERE MATCH_ID = :2",
+                [dt, open_match['match_id']],
+            )
+        else:
+            client.exec(
+                "UPDATE SARANG_HAB_JAE_YANG SET MATCH_SCHEDULED_AT = TO_TIMESTAMP(:1, 'YYYY-MM-DD HH24:MI') WHERE HAB_JAE_YANG_ID = :2",
+                [dt, hj_id],
+            )
     elif edit_type == 'subGuide':
         parts = str(value or '').split(',')
         sub_name = parts[0].strip() if parts else ''
