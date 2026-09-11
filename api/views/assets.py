@@ -93,12 +93,181 @@ _CALL_TTL_S = 60
 _PRESENCE_TTL_S = 12
 
 
+_APPROVAL_KO = {'pending': '대기', 'approved': '재가', 'rejected': '반려'}
+# 결과입력 6옵션의 아이콘 — MatchResultPopup.vue/handleMatchResultPick과 1:1(❌=부정 결과,
+# ⭕️=긍정/진행 결과). matchResultDetail 문자열에 그대로 박혀서 프론트 필터/색상 판단에 쓰임.
+_MATCH_RESULT_ICON = {'취소': '❌', '밀림': '❌', '비합': '⭕️', '탈락': '⭕️', '2차 만남': '⭕️', '상담 따기': '⭕️'}
+# RESULT 컬럼 값(스페이스 있음, 다른 카테고리와 CHECK 제약 스타일 통일)과 프론트가 부분
+# 문자열로 매칭하는 라벨(스페이스 없음, 예: resDisp.includes('상담따기'))이 달라서 필요.
+_RESULT_DISPLAY_LABEL = {'상담 따기': '상담따기', '2차 만남': '2차만남'}
+
+
+def _result_label(result):
+    return _RESULT_DISPLAY_LABEL.get(result, result)
+
+
 @csrf_exempt
+@require_jwt
 def get_assets(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /get-assets 포팅
+    """TM 만남픽스 이후 ~ 매칭 종료까지 다루는 '매칭 절대 지켜!' 화면 데이터.
+    services/main/src/routes/assets.js의 GET /get-assets를 새 SARANG 스키마로 재구현.
+    프론트(MatchingScreen.vue)는 그대로 두고 예전과 같은 shape(approvalStatus/
+    matchResultDetail/habjaeyang/logs/meetings)을 맞춰서 내려줌 — 팀 스코프는 get-shed-
+    prospects와 같은 이유로 안 둠(프론트가 팀으로 안 좁힘)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    client = DataRouterClient()
+    rows = client.query(
+        """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.MBTI, s.CREATED_AT,
+                  spi.NAME, spi.PHONE,
+                  im.NAME AS MANAGER_NAME,
+                  hj.HAB_JAE_YANG_ID,
+                  TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
+                  TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
+                  hj.MATCH_LOCATION, hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y,
+                  hj.APPLICATION_PURPOSE, hj.SELF_IMAGE, hj.DESIRED_IMAGE, hj.CHARACTER_NOTE,
+                  hj.ALERT_NOTE, hj.DISTANCE_BURDEN,
+                  hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.REJECT_REASON,
+                  gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
+                  COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, hj.TEACHER_MEMBER_ID,
+                  CASE WHEN sid.SARANG_ID IS NOT NULL THEN 1 ELSE 0 END AS IS_SHED
+             FROM SARANG s
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN MEMBERS im ON im.MEMBER_ID = s.INFLOW_MEMBER_ID
+             LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+             LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = hj.GUIDE_MEMBER_ID
+             LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = hj.CALLER_MEMBER_ID
+             LEFT JOIN MEMBERS tcm ON tcm.MEMBER_ID = hj.TEACHER_MEMBER_ID
+             LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+            WHERE s.STAGE NOT IN ('유입', '티엠')
+              AND s.DELETED_AT IS NULL
+              AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '90' DAY
+            ORDER BY s.CREATED_AT DESC
+            FETCH FIRST 1000 ROWS ONLY"""
+    )
+
+    sarang_ids = [r['sarang_id'] for r in rows]
+    match_rows, tm_rows, activity_rows = [], [], []
+    if sarang_ids:
+        placeholders = ', '.join(f':{i + 1}' for i in range(len(sarang_ids)))
+        match_rows = client.query(
+            f"""SELECT smh.SARANG_ID, smh.MATCH_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT,
+                       TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE,
+                       TO_CHAR(smh.MATCHED_AT, 'HH24:MI') AS MT_TIME,
+                       smh.MATCH_LOCATION, smh.STATUS, smh.RESULT, smh.SUB_REASON,
+                       TO_CHAR(smh.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YY.MM.DD HH24:MI') AS CREATED_TS,
+                       smh.CREATED_AT AS SORT_TS
+                  FROM SARANG_MATCH_HISTORIES smh WHERE smh.SARANG_ID IN ({placeholders})
+                 ORDER BY smh.MATCH_DEGREE, smh.ATTEMPT_COUNT""",
+            sarang_ids,
+        )
+        tm_rows = client.query(
+            f"""SELECT tl.SARANG_ID, tl.TM_ID AS LOG_ID, trc.LABEL, tl.SUB_REASON, cm.NAME AS ACTOR_NAME,
+                       TO_CHAR(tl.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YY.MM.DD HH24:MI') AS TS,
+                       tl.CREATED_AT AS SORT_TS
+                  FROM TM_LOGS tl
+                  JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
+                  JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = tl.RESULT
+                 WHERE tl.SARANG_ID IN ({placeholders})""",
+            sarang_ids,
+        )
+        activity_rows = client.query(
+            f"""SELECT al.SARANG_ID, al.ACTIVITY_ID AS LOG_ID, al.EVENT_TYPE, am.NAME AS ACTOR_NAME,
+                       TO_CHAR(al.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YY.MM.DD HH24:MI') AS TS,
+                       al.CREATED_AT AS SORT_TS
+                  FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS am ON am.MEMBER_ID = al.ACTOR_MEMBER_ID
+                 WHERE al.SARANG_ID IN ({placeholders})""",
+            sarang_ids,
+        )
+
+    # MatchingScreen.vue의 formatLogs()가 기대하는 "날짜 | 종류 | 내용 | 작성자" 파이프
+    # 3~4단 문자열 포맷 — 구조화된 필드 대신 레거시 그대로 문자열로 합성.
+    logs_by_id = {}
+    for r in tm_rows:
+        content = r['sub_reason'] or r['label']
+        line = f"{r['ts']} | {r['label']} | {content} | {r['actor_name']}"
+        logs_by_id.setdefault(r['sarang_id'], []).append({'id': r['log_id'], 'source': 'tm', 'text': line, 'sort_ts': r['sort_ts']})
+    for r in activity_rows:
+        line = f"{r['ts']} | {r['event_type']} | {r['event_type']} | {r['actor_name']}"
+        logs_by_id.setdefault(r['sarang_id'], []).append({'id': r['log_id'], 'source': 'activity', 'text': line, 'sort_ts': r['sort_ts']})
+
+    match_by_id = {}
+    for r in match_rows:
+        match_by_id.setdefault(r['sarang_id'], []).append(r)
+        if r['result']:
+            detail = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason'] or _result_label(r['result'])}"
+            line = f"{r['created_ts']} | 매칭결과 | {detail} | "
+            logs_by_id.setdefault(r['sarang_id'], []).append({'id': r['match_id'], 'source': 'match', 'text': line, 'sort_ts': r['sort_ts']})
+    for sid in logs_by_id:
+        logs_by_id[sid].sort(key=lambda x: x['sort_ts'], reverse=True)
+
+    list_ = []
+    for r in rows:
+        sid = r['sarang_id']
+        hist = match_by_id.get(sid) or []
+        latest = hist[-1] if hist else None
+        match_result_detail = ''
+        if latest and latest['result']:
+            match_result_detail = f"{_MATCH_RESULT_ICON.get(latest['result'], '')}{latest['sub_reason'] or _result_label(latest['result'])}"
+
+        meetings = [{
+            'meetingId': m['match_id'],
+            'date': m['mt_date'] or '',
+            'time': m['mt_time'] or '',
+            'place': m['match_location'] or '',
+            'outcome': (f"{_MATCH_RESULT_ICON.get(m['result'], '')}{m['sub_reason'] or _result_label(m['result'])}") if m['result'] else None,
+            'attended': None,
+        } for m in hist]
+
+        entries = logs_by_id.get(sid, [])
+        has_hj = bool(r['hab_jae_yang_id'])
+        list_.append({
+            'id': sid,
+            'docId': sid,
+            'name': r['name'] or '',
+            'phone': r['phone'] or '',
+            'age': r['age'] or '',
+            'manager': r['manager_name'] or '',
+            'teacher': r['teacher_name'] or '',
+            'teacherSabun': r['teacher_member_id'] or '',
+            # isShed 판정용 — MatchingScreen.vue가 path.startsWith('shed_')로 체크.
+            'path': 'shed_1' if r['is_shed'] == '1' else '',
+            'tmResultDetail': '만남픽스',
+            'matchResultDetail': match_result_detail,
+            'approvalStatus': _APPROVAL_KO.get(r['approval_status'], '') if has_hj else '',
+            'habjaeyang': {
+                'id': r['hab_jae_yang_id'],
+                'subName': r['name'] or '',
+                'guide': r['guide_name'] or '',
+                'tmName': r['caller_name'] or '',
+                'mtDate': r['mt_date'] or '',
+                'mtTime': r['mt_time'] or '',
+                'mtPlace': r['match_location'] or '',
+                'mbti': r['mbti'] or '',
+                'job': r['school_major_job'] or '',
+                'schedule': r['schedule'] or '',
+                'sch': r['schedule'] or '',
+                'plan': r['environment_1y'] or '',
+                'purpose': r['application_purpose'] or '',
+                'selfImage': r['self_image'] or '',
+                'trouble': r['desired_image'] or '',
+                'att': r['character_note'] or '',
+                'wary': r['alert_note'] or '',
+                'dist': r['distance_burden'] or '',
+                'etc': '',
+                'replied': r['has_replied'] == '1',
+                'windowOpened': r['is_window_opened'] == '1',
+            } if has_hj else {},
+            'logs': '\n'.join(x['text'] for x in entries),
+            'logEntries': [{'id': x['id'], 'source': x['source'], 'text': x['text']} for x in entries],
+            'lastLogTime': entries[0]['text'].split('|')[0].strip() if entries else '',
+            'meetings': meetings,
+            'finalResult': '',
+            'note': {'nextCallDate': '', 'schedule': None},
+        })
+
+    return JsonResponse({'success': True, 'list': list_})
 
 
 @csrf_exempt
@@ -133,12 +302,58 @@ def search_prospects(request, *args, **kwargs):
     return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
 
 
+_RESULT_SUB_REASON_MAP = {
+    '경계취소': '취소', '갈부취소': '취소', '환경취소': '취소', '연두취소': '취소',
+    '환경비합': '비합', '인성비합': '비합', '정신질환': '비합', '건강비합': '비합',
+    '경계탈락': '탈락', '갈부탈락': '탈락',
+}
+
+
 @csrf_exempt
+@require_jwt
 def update_match(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /update-match 포팅
+    """매칭 결과 입력(취소/비합/탈락/상담따기) — MatchResultPopup 6옵션 중 밀림/2차만남은
+    /api/postpone-meeting으로 따로 감. 따기보고(type='ttagi')는 저장할 테이블이 아직
+    없어 미구현 — habjaeyang/teacher 타입도 이 화면에선 안 씀(edit-match가 담당)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    edit_type = str(body.get('type') or '')
+    data = body.get('data') or {}
+    if not sarang_id:
+        return JsonResponse({'success': False, 'message': 'rowIndex 필요'}, status=400)
+    if edit_type != 'status':
+        return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'}, status=400)
+
+    match_result = str(data.get('matchResult') or '').strip()
+    detail = match_result
+    for icon in ('❌', '⭕️', '⭕'):
+        if detail.startswith(icon):
+            detail = detail[len(icon):]
+            break
+    if detail == '상담따기':
+        result_val, sub_reason = '상담 따기', None
+    else:
+        result_val = _RESULT_SUB_REASON_MAP.get(detail)
+        sub_reason = detail if result_val else None
+    if not result_val:
+        return JsonResponse({'success': False, 'message': f'알 수 없는 결과: {match_result}'}, status=400)
+
+    client = DataRouterClient()
+    cur = client.query_one(
+        """SELECT MATCH_ID FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
+            ORDER BY MATCH_DEGREE DESC, ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
+        [sarang_id],
+    )
+    if not cur:
+        return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
+    client.exec(
+        "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
+        [result_val, sub_reason, cur['match_id']],
+    )
+    return JsonResponse({'success': True, 'message': '결과가 입력됐어!'})
 
 
 @csrf_exempt
@@ -291,6 +506,15 @@ def delete_log(request, *args, **kwargs):
         if row['result'] == 'MEET_FIX':
             stmts.append({'sql': "UPDATE SARANG SET STAGE = '티엠' WHERE SARANG_ID = :1", 'args': [sarang_id]})
         client.tx(stmts)
+    elif source == 'match':
+        # 매칭결과 로그는 SARANG_MATCH_HISTORIES 행 자체(만남 일정) 삭제가 아니라
+        # 입력된 결과만 되돌림 — 그 행은 날짜/장소/교사 정보도 같이 들고 있음.
+        affected = client.exec(
+            "UPDATE SARANG_MATCH_HISTORIES SET RESULT = NULL, SUB_REASON = NULL, STATUS = 'SCHEDULED' WHERE MATCH_ID = :1 AND SARANG_ID = :2",
+            [log_id, sarang_id],
+        )
+        if not affected:
+            return JsonResponse({'success': False, 'message': '로그를 찾을 수 없어요'}, status=404)
     else:
         affected = client.exec(
             "DELETE FROM SARANG_ACTIVITY_LOGS WHERE ACTIVITY_ID = :1 AND SARANG_ID = :2", [log_id, sarang_id]
@@ -302,27 +526,155 @@ def delete_log(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def toggle_hj_status(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /toggle-hj-status 포팅
+    """합재양 답장/창개설 토글 — 매칭 절대 지켜! 카드의 💬/🚪 버튼."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('docId') or '').strip()
+    field = str(body.get('field') or '')
+    if not sarang_id or field not in ('replied', 'windowOpened'):
+        return JsonResponse({'success': False, 'message': 'invalid request'}, status=400)
+
+    col = 'HAS_REPLIED' if field == 'replied' else 'IS_WINDOW_OPENED'
+    client = DataRouterClient()
+    cur = client.query_one(
+        f"SELECT {col} AS V FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+        [sarang_id],
+    )
+    if not cur:
+        return JsonResponse({'success': False, 'message': '활성 합재양 없음'}, status=404)
+    new_val = 0 if cur['v'] == '1' else 1
+    client.exec(
+        f"UPDATE SARANG_HAB_JAE_YANG SET {col} = :1 WHERE SARANG_ID = :2 AND IS_ACTIVE = 1",
+        [new_val, sarang_id],
+    )
+    return JsonResponse({'success': True, 'value': bool(new_val)})
 
 
 @csrf_exempt
+@require_jwt
 def edit_match(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /edit-match 포팅
+    """매칭 절대 지켜! 카드의 날짜수정/섭외자·인도자수정/교사입력 액션. type별 분기는
+    MatchingScreen.vue의 editMatchAction/editSubName/editGuideName/handleTeacherSubmit과 1:1."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    edit_type = str(body.get('type') or '')
+    value = body.get('value')
+    if not sarang_id or not edit_type:
+        return JsonResponse({'success': False, 'message': 'rowIndex/type 필요'}, status=400)
+
+    client = DataRouterClient()
+    hj = client.query_one(
+        "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+        [sarang_id],
+    )
+    if not hj:
+        return JsonResponse({'success': False, 'message': '활성 합재양이 없어요'}, status=404)
+    hj_id = hj['hab_jae_yang_id']
+
+    if edit_type == 'teacher':
+        raw = str(value or '').strip()
+        is_other_region = raw.endswith('(타지역)')
+        teacher_name = raw[:-5].strip() if is_other_region else raw.split('(')[0].strip()
+        teacher_id, override = None, None
+        if teacher_name and teacher_name != '-':
+            if is_other_region:
+                override = raw
+            else:
+                teacher_id = _member_id_by_name(client, teacher_name)
+                if not teacher_id:
+                    return JsonResponse({'success': False, 'message': f'사용자 [{teacher_name}] 명단에 없어!'})
+        client.exec(
+            "UPDATE SARANG_HAB_JAE_YANG SET TEACHER_MEMBER_ID = :1, TEACHER_NAME_OVERRIDE = :2 WHERE HAB_JAE_YANG_ID = :3",
+            [teacher_id, override, hj_id],
+        )
+    elif edit_type == 'date':
+        dt = str(value or '').replace('T', ' ')[:16]
+        client.exec(
+            "UPDATE SARANG_HAB_JAE_YANG SET MATCH_SCHEDULED_AT = TO_TIMESTAMP(:1, 'YYYY-MM-DD HH24:MI') WHERE HAB_JAE_YANG_ID = :2",
+            [dt, hj_id],
+        )
+    elif edit_type == 'subGuide':
+        parts = str(value or '').split(',')
+        sub_name = parts[0].strip() if parts else ''
+        guide_name = parts[1].strip() if len(parts) > 1 else ''
+        if sub_name:
+            client.exec(
+                """UPDATE SARANG_PERSONAL_INFO SET NAME = :1
+                    WHERE PERSONAL_INFO_ID = (SELECT PERSONAL_INFO_ID FROM SARANG WHERE SARANG_ID = :2)""",
+                [sub_name, sarang_id],
+            )
+        elif guide_name:
+            guide_id = _member_id_by_name(client, guide_name)
+            if not guide_id:
+                return JsonResponse({'success': False, 'message': f'사용자 [{guide_name}] 명단에 없어!'})
+            client.exec(
+                "UPDATE SARANG_HAB_JAE_YANG SET GUIDE_MEMBER_ID = :1 WHERE HAB_JAE_YANG_ID = :2",
+                [guide_id, hj_id],
+            )
+    else:
+        return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'})
+
+    return JsonResponse({'success': True, 'message': '반영 완료!'})
 
 
 @csrf_exempt
+@require_jwt
 def update_approval(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /update-approval 포팅
+    """합재양 재가/반려 처리 — 매칭 절대 지켜! 🔒 버튼 뒤의 결정 팝업(showApprDecisionPopup)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    status_ko = str(body.get('status') or '').strip()
+    reason = str(body.get('reason') or '').strip()[:500]
+    status_map = {'재가': 'approved', '반려': 'rejected'}
+    enum_val = status_map.get(status_ko)
+    if not sarang_id or not enum_val:
+        return JsonResponse({'success': False, 'message': 'rowIndex, status 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+    hj = client.query_one(
+        "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+        [sarang_id],
+    )
+    if not hj:
+        return JsonResponse({'success': False, 'message': '활성 합재양이 없어요'}, status=404)
+
+    event_type = '재가처리' if enum_val == 'approved' else '반려처리'
+    stmts = [
+        {'sql': "UPDATE SARANG_HAB_JAE_YANG SET APPROVAL_STATUS = :1, REJECT_REASON = :2 WHERE HAB_JAE_YANG_ID = :3",
+         'args': [enum_val, reason or None, hj['hab_jae_yang_id']]},
+        {'sql': "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE, CONTENT) VALUES (:1, :2, :3, :4, :5)",
+         'args': [uuid.uuid4().hex.upper(), sarang_id, sabun, event_type, reason or None]},
+    ]
+    if enum_val == 'approved':
+        stmts.append({'sql': "UPDATE SARANG SET STAGE = '재가' WHERE SARANG_ID = :1", 'args': [sarang_id]})
+        # 재가 시점에 1차 매칭 시도 행을 만들어둠(합재양에 적힌 만남 일정을 그대로 시드) —
+        # 결과입력/날짜수정/교사배정이 여기부터 이 행을 갱신하며 진행됨.
+        existing_match = client.query_one(
+            "SELECT MATCH_ID FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1", [sarang_id]
+        )
+        if not existing_match:
+            # MATCH_SCHEDULED_AT은 TIMESTAMP라 go-ora로 조회한 문자열을 그대로 다시
+            # 바인딩하면 ORA-01843이 남 — INSERT...SELECT로 DB 안에서 직접 복사.
+            stmts.append({
+                'sql': """INSERT INTO SARANG_MATCH_HISTORIES
+                            (MATCH_ID, SARANG_ID, MATCH_DEGREE, ATTEMPT_COUNT, MATCHED_AT, MATCH_LOCATION, STATUS)
+                          SELECT :1, SARANG_ID, 1, 1, COALESCE(MATCH_SCHEDULED_AT, SYSTIMESTAMP), MATCH_LOCATION, 'SCHEDULED'
+                            FROM SARANG_HAB_JAE_YANG WHERE HAB_JAE_YANG_ID = :2""",
+                'args': [uuid.uuid4().hex.upper(), hj['hab_jae_yang_id']],
+            })
+    client.tx(stmts)
+    return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
 
 
 @csrf_exempt
