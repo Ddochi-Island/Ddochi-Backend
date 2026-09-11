@@ -96,14 +96,9 @@ _PRESENCE_TTL_S = 12
 _APPROVAL_KO = {'pending': '대기', 'approved': '재가', 'rejected': '반려'}
 # 결과입력 6옵션의 아이콘 — MatchResultPopup.vue/handleMatchResultPick과 1:1(❌=부정 결과,
 # ⭕️=긍정/진행 결과). matchResultDetail 문자열에 그대로 박혀서 프론트 필터/색상 판단에 쓰임.
-_MATCH_RESULT_ICON = {'취소': '❌', '밀림': '❌', '비합': '⭕️', '탈락': '⭕️', '2차 만남': '⭕️', '상담 따기': '⭕️'}
-# RESULT 컬럼 값(스페이스 있음, 다른 카테고리와 CHECK 제약 스타일 통일)과 프론트가 부분
-# 문자열로 매칭하는 라벨(스페이스 없음, 예: resDisp.includes('상담따기'))이 달라서 필요.
-_RESULT_DISPLAY_LABEL = {'상담 따기': '상담따기', '2차 만남': '2차만남'}
-
-
-def _result_label(result):
-    return _RESULT_DISPLAY_LABEL.get(result, result)
+# MATCH_RESULT_CODES.RESULT_CODE 기준 아이콘 — MatchResultPopup.vue의
+# handleMatchResultPick과 1:1(❌=부정 결과, ⭕️=긍정/진행 결과).
+_MATCH_RESULT_ICON = {'CANCEL': '❌', 'DELAY': '❌', 'UNFIT': '⭕️', 'DROPOUT': '⭕️', 'SECOND_MEET': '⭕️', 'CONSULT_WIN': '⭕️'}
 
 
 @csrf_exempt
@@ -155,10 +150,14 @@ def get_assets(request, *args, **kwargs):
             f"""SELECT smh.SARANG_ID, smh.MATCH_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT,
                        TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE,
                        TO_CHAR(smh.MATCHED_AT, 'HH24:MI') AS MT_TIME,
-                       smh.MATCH_LOCATION, smh.STATUS, smh.RESULT, smh.SUB_REASON,
+                       smh.MATCH_LOCATION, smh.STATUS, smh.RESULT,
+                       mrc.LABEL AS RESULT_LABEL, msrc.LABEL AS SUB_REASON_LABEL,
                        TO_CHAR(smh.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YY.MM.DD HH24:MI') AS CREATED_TS,
                        smh.CREATED_AT AS SORT_TS
-                  FROM SARANG_MATCH_HISTORIES smh WHERE smh.SARANG_ID IN ({placeholders})
+                  FROM SARANG_MATCH_HISTORIES smh
+                  LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = smh.RESULT
+                  LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
+                 WHERE smh.SARANG_ID IN ({placeholders})
                  ORDER BY smh.MATCH_DEGREE, smh.ATTEMPT_COUNT""",
             sarang_ids,
         )
@@ -196,7 +195,7 @@ def get_assets(request, *args, **kwargs):
     for r in match_rows:
         match_by_id.setdefault(r['sarang_id'], []).append(r)
         if r['result']:
-            detail = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason'] or _result_label(r['result'])}"
+            detail = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason_label'] or r['result_label']}"
             line = f"{r['created_ts']} | 매칭결과 | {detail} | "
             logs_by_id.setdefault(r['sarang_id'], []).append({'id': r['match_id'], 'source': 'match', 'text': line, 'sort_ts': r['sort_ts']})
     for sid in logs_by_id:
@@ -209,14 +208,14 @@ def get_assets(request, *args, **kwargs):
         latest = hist[-1] if hist else None
         match_result_detail = ''
         if latest and latest['result']:
-            match_result_detail = f"{_MATCH_RESULT_ICON.get(latest['result'], '')}{latest['sub_reason'] or _result_label(latest['result'])}"
+            match_result_detail = f"{_MATCH_RESULT_ICON.get(latest['result'], '')}{latest['sub_reason_label'] or latest['result_label']}"
 
         meetings = [{
             'meetingId': m['match_id'],
             'date': m['mt_date'] or '',
             'time': m['mt_time'] or '',
             'place': m['match_location'] or '',
-            'outcome': (f"{_MATCH_RESULT_ICON.get(m['result'], '')}{m['sub_reason'] or _result_label(m['result'])}") if m['result'] else None,
+            'outcome': (f"{_MATCH_RESULT_ICON.get(m['result'], '')}{m['sub_reason_label'] or m['result_label']}") if m['result'] else None,
             'attended': None,
         } for m in hist]
 
@@ -302,10 +301,14 @@ def search_prospects(request, *args, **kwargs):
     return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
 
 
+# 프론트가 보내는 한글 세부사유(reasonType) → (MATCH_RESULT_CODES.RESULT_CODE,
+# MATCH_SUB_REASON_CODES.SUB_CODE). sql/11_match_result_codes.sql의 LABEL과 1:1.
 _RESULT_SUB_REASON_MAP = {
-    '경계취소': '취소', '갈부취소': '취소', '환경취소': '취소', '연두취소': '취소',
-    '환경비합': '비합', '인성비합': '비합', '정신질환': '비합', '건강비합': '비합',
-    '경계탈락': '탈락', '갈부탈락': '탈락',
+    '경계취소': ('CANCEL', 'BOUNDARY_CANCEL'), '갈부취소': ('CANCEL', 'CONFLICT_CANCEL'),
+    '환경취소': ('CANCEL', 'ENV_CANCEL'), '연두취소': ('CANCEL', 'CONTACT_LOST_CANCEL'),
+    '환경비합': ('UNFIT', 'ENV_UNFIT'), '인성비합': ('UNFIT', 'PERSONALITY_UNFIT'),
+    '정신질환': ('UNFIT', 'MENTAL_HEALTH'), '건강비합': ('UNFIT', 'HEALTH_UNFIT'),
+    '경계탈락': ('DROPOUT', 'BOUNDARY_DROPOUT'), '갈부탈락': ('DROPOUT', 'CONFLICT_DROPOUT'),
 }
 
 
@@ -334,10 +337,10 @@ def update_match(request, *args, **kwargs):
             detail = detail[len(icon):]
             break
     if detail == '상담따기':
-        result_val, sub_reason = '상담 따기', None
+        result_val, sub_reason = 'CONSULT_WIN', None
     else:
-        result_val = _RESULT_SUB_REASON_MAP.get(detail)
-        sub_reason = detail if result_val else None
+        pair = _RESULT_SUB_REASON_MAP.get(detail)
+        result_val, sub_reason = pair if pair else (None, None)
     if not result_val:
         return JsonResponse({'success': False, 'message': f'알 수 없는 결과: {match_result}'}, status=400)
 
