@@ -1,12 +1,14 @@
-"""auth.js 포팅 — login/refresh 실제 로직. admin-unlock/auth-config는 apiAuth
-글로벌 JWT 게이트가 아직 없어서 스텁으로 남겨둠."""
+"""auth.js 포팅 — login/refresh 실제 로직. auth-config는 apiAuth 글로벌 JWT
+게이트가 아직 없어서 스텁으로 남겨둠."""
 import json
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from api.auth import jwt as auth_jwt
 from api.auth import passkey
+from api.auth.gate import require_jwt
 from api.clients.data_router import DataRouterClient, DataRouterError
 
 
@@ -157,11 +159,24 @@ def refresh(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def admin_unlock(request, *args, **kwargs):
-    # TODO: apiAuth 글로벌 JWT 게이트(req.user) 구현 후 포팅
+    """사이드바 "👑 사명의 길" 진입 시 비밀번호 확인 — 통과하면 같은 사용자 정보에
+    adminUnlocked 클레임만 얹은 새 토큰 쌍을 발급(레거시와 동일한 패턴)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/auth.js"}, status=501)
+
+    body = _json_body(request)
+    supplied = str(body.get('password') or '')
+    if supplied != settings.ADMIN_PASSWORD:
+        return JsonResponse({'success': False, 'message': '비밀번호가 틀렸어!'}, status=401)
+
+    user = request.user
+    tokens = auth_jwt.sign(
+        {'sabun': user['sabun'], 'name': user.get('name'), 'team': user.get('team'), 'position': user.get('position')},
+        extra_claims={'adminUnlocked': True},
+    )
+    return JsonResponse({'success': True, **tokens})
 
 
 @csrf_exempt
