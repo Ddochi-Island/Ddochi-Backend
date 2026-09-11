@@ -126,7 +126,9 @@ def get_assets(request, *args, **kwargs):
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.REJECT_REASON,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
                   COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, hj.TEACHER_MEMBER_ID,
-                  sid.SOURCE_LINK
+                  sid.SOURCE_LINK,
+                  COALESCE(TO_CHAR(mf.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'MM/DD HH24:MI'),
+                           TO_CHAR(hj.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'MM/DD HH24:MI')) AS PIX_TS
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN MEMBERS im ON im.MEMBER_ID = s.INFLOW_MEMBER_ID
@@ -135,6 +137,11 @@ def get_assets(request, *args, **kwargs):
              LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = hj.CALLER_MEMBER_ID
              LEFT JOIN MEMBERS tcm ON tcm.MEMBER_ID = hj.TEACHER_MEMBER_ID
              LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             LEFT JOIN (
+               SELECT SARANG_ID, CREATED_AT,
+                      ROW_NUMBER() OVER (PARTITION BY SARANG_ID ORDER BY CREATED_AT DESC) AS RN
+                 FROM TM_LOGS WHERE RESULT = 'MEET_FIX'
+             ) mf ON mf.SARANG_ID = s.SARANG_ID AND mf.RN = 1
             WHERE s.STAGE NOT IN ('유입', '티엠')
               AND s.DELETED_AT IS NULL
               AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '90' DAY
@@ -261,6 +268,7 @@ def get_assets(request, *args, **kwargs):
                 'dist': r['distance_burden'] or '',
                 'qna': r['qna'] or '',
                 'etc': r['etc'] or '',
+                'pixTs': r['pix_ts'] or '',
                 'replied': r['has_replied'] == '1',
                 'windowOpened': r['is_window_opened'] == '1',
             } if has_hj else {},
