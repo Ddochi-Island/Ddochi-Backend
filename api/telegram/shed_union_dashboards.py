@@ -277,42 +277,48 @@ def _fetch_tm_approvals(client, regions, date_str):
     )
 
 
+_DIVIDER = '---------------------------'
+
+
 def _build_tm_text(group, label, regs, logs, approvals):
     now = datetime.datetime.now()
+    success_count = sum(1 for l in logs if l['result'] == 'MEET_FIX')
 
     by_region = {}
     for r in regs:
         by_region.setdefault(r['region_code'], []).append(r)
 
     lines = [
-        '➖➖➖➖➖➖➖➖➖➖', f'🐾📞 {label} 오늘의 현황',
+        f'🐾📞 {label} 오늘의 현황',
         f"- {_fmt_md(now.date().isoformat())} {now.strftime('%H:%M')} 기준",
-        f"번호찾 {len(regs)}명 · 시도 {len(logs)}건 · 성사 {sum(1 for l in logs if l['result'] == 'MEET_FIX')}건 · 합자찾 {len(approvals)}명",
         '',
+        f"📋 번호찾 {len(regs)}명 · 📞 시도 {len(logs)}건 · ✅ 성사 {success_count}건 · 🤝 합자찾 {len(approvals)}명",
+        '',
+        _DIVIDER,
+        f'📋 번호찾 총 {len(regs)}명',
     ]
-
-    lines.append('📋 번호찾')
     if by_region:
         for rc in sorted(by_region.keys()):
             names = ', '.join(f"{r['introducer_name'] or '-'}→{r['pi_name']}" for r in by_region[rc])
             lines.append(f'◾️{rc}지역 ({len(by_region[rc])}명): {names}')
     else:
-        lines.append('(오늘 등록된 번호찾이 없어)')
-    lines.append('')
+        lines.append('없음')
 
+    lines.append(_DIVIDER)
     lines.append('📞 티엠 현황')
+    lines.append(f'📝 시도 {len(logs)}건 · ✅ 성사 {success_count}건')
+    lines.append('')
     if logs:
         by_caller = {}
         for l in logs:
-            by_caller.setdefault(l['caller_name'] or '-', 0)
-            by_caller[l['caller_name'] or '-'] += 1
-        for name, cnt in sorted(by_caller.items(), key=lambda x: -x[1]):
-            lines.append(f'  {name}: {cnt}건')
-        by_result = {}
-        for l in logs:
-            by_result.setdefault(l['result'], 0)
-            by_result[l['result']] += 1
-        lines.append('  ' + ' / '.join(f"{_RESULT_ICON.get(r, '')}{_RESULT_LABEL.get(r, r)} {c}" for r, c in by_result.items()))
+            slot = by_caller.setdefault(l['caller_name'] or '-', {'total': 0, 'success': 0})
+            slot['total'] += 1
+            if l['result'] == 'MEET_FIX':
+                slot['success'] += 1
+        ranked = sorted(by_caller.items(), key=lambda x: -x[1]['total'])
+        for i, (name, s) in enumerate(ranked):
+            crown = '👑' if i == 0 else '▫️'
+            lines.append(f"{crown} {name}  {s['total']}건 / {s['success']}건 성사")
         for target in ('UNFIT', 'REJECT'):
             reasons = [l['sub_reason_label'] for l in logs if l['result'] == target and l['sub_reason_label']]
             if reasons:
@@ -320,19 +326,18 @@ def _build_tm_text(group, label, regs, logs, approvals):
                 for rs in reasons:
                     by_reason.setdefault(rs, 0)
                     by_reason[rs] += 1
-                lines.append(f"  {_RESULT_LABEL[target]} 사유: " + ', '.join(f'{rs}({c})' for rs, c in by_reason.items()))
+                lines.append(f"{_RESULT_LABEL[target]} 사유: " + ', '.join(f'{rs}({c})' for rs, c in by_reason.items()))
     else:
-        lines.append('(오늘 티엠 시도가 없어)')
-    lines.append('')
+        lines.append('없음')
 
-    lines.append('🤝 합자찾')
+    lines.append(_DIVIDER)
+    lines.append(f'🤝 합자찾 총 {len(approvals)}명')
     if approvals:
         for a in approvals:
             lines.append(f"섭:{a['pi_name']}  유:{a['introducer_name'] or '-'}  티:{a['caller_name'] or '-'}")
     else:
-        lines.append('(오늘 합자찾이 없어)')
+        lines.append('없음')
 
-    lines.append('➖➖➖➖➖➖➖➖➖➖')
     text = '\n'.join(lines)
     return text[:4000] + ('\n…' if len(text) > 4000 else '')
 
