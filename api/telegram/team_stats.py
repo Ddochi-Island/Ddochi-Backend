@@ -36,6 +36,14 @@ def _pct(cur, goal):
     return f'{round(cur / goal * 100)}%' if goal else '0%'
 
 
+def _cell(v):
+    return f' {str(v):<2} '
+
+
+def _table_row(dc, cols):
+    return f' {str(dc):<2} |' + ''.join(f'{_cell(v)}|' for v in cols)
+
+
 def _fetch_districts(client, region_code):
     rows = client.query(
         """SELECT DISTINCT DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES
@@ -226,8 +234,8 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, distr
     on_rows = ['구역|홍보|디엠|유입|재가']
     for dc in sorted(by_district.keys()):
         s = by_district[dc]
-        off_rows.append(f"{dc}|{s['off_act']}|{s['talk']}|{s['shed_reg']}|{s['appr_off']}")
-        on_rows.append(f"{dc}|{s['promo']}|{s['dm']}|{s['intake']}|{s['appr_on']}")
+        off_rows.append(_table_row(dc, [s['off_act'], s['talk'], s['shed_reg'], s['appr_off']]))
+        on_rows.append(_table_row(dc, [s['promo'], s['dm'], s['intake'], s['appr_on']]))
     lines.append('<code>' + '\n'.join(off_rows) + '</code>')
     lines.append('')
     lines.append('[온라인]')
