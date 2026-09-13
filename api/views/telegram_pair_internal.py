@@ -2,8 +2,8 @@
 # 별도 서비스)가 그룹챗에서 "/pair CODE"를 감지하면 이 엔드포인트를 호출해서
 # 페어링을 완성함(main은 텔레그램 API를 직접 안 부름 — 봇 세션은 tel_router 쪽에만 있어서
 # 환영 메시지 발송도 tel_router가 이 응답의 welcomeText/welcomeButton을 보고 직접 함).
-import hmac
 import json
+import logging
 import time
 
 from django.conf import settings
@@ -11,6 +11,9 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from api.clients.data_router import DataRouterClient
+from api.telegram.internal_auth import check_internal_auth
+from api.telegram.matching_dashboard import refresh_matching_dashboard
+from api.telegram.prospect_dashboard import refresh_prospect_dashboard
 from api.telegram.team_config import patch_team_config
 from api.views.telegram_pair import CHANNEL_DEFS
 
@@ -22,18 +25,6 @@ def _json_body(request):
         return {}
 
 
-def _check_internal_auth(request):
-    token = settings.TELEGRAM_INTERNAL_TOKEN
-    if not token:
-        return False
-    got = request.headers.get('Authorization', '')
-    if got.startswith('Bearer '):
-        got = got[len('Bearer '):]
-    if len(got) != len(token):
-        return False
-    return hmac.compare_digest(got, token)
-
-
 # 채널별 환영 메시지 텍스트/버튼 — services/main routes/teams.js CHANNEL_DEFS의
 # welcome/button 그대로. 이 프로젝트엔 TEAMS.DISPLAY_NAME이 없어서 팀 이름 자리엔
 # TEAM_ID(REGION_CODE) 코드값을 그대로 씀.
@@ -41,8 +32,6 @@ _WELCOME = {
     'dashboard':       {'text': lambda t: f'👋 [{t}] 또치섬 대시보드가 연결되었어!', 'button': ('입국하기 🛫', '?startapp=dailyReport')},
     'stats':           {'text': lambda t: f'📈 [{t}] 통계 알림방이 연결되었어!'},
     'prayer':          {'text': lambda t: f'🙏 [{t}] 향연(기도문) 방이 연결되었어! 이제 이곳에 향연이 피어오를거야.', 'button': ('🙏 향 붙이러 가기', '?startapp=prayer')},
-    'matching':        {'text': lambda t: f'⚔️ [{t}] 매칭전광판이 연결되었어!\n매 정각에 현황이 이곳에 올라올거야 🕐', 'button': ('매칭 절대지켜! 🛡️', '?startapp=matching')},
-    'prospect':        {'text': lambda t: f'🔎 [{t}] 찾기현황판이 연결되었어!\n매 정각에 현황이 이곳에 올라올거야 🕐', 'button': ('매칭 절대지켜! 🛡️', '?startapp=matching')},
     'feedback':        {'text': lambda t: f'📋 [{t}] 매칭피드백 방이 연결되었어!', 'button': ('센터 가보자! 🏃', '?startapp=center')},
     'returnHome':      {'text': lambda t: f'🏠 [{t}] 귀소할일 알림방이 연결되었어!'},
     'community':       {'text': lambda t: f'📖 [{t}] 전도 노트(커뮤니티) 알림방이 연결되었어!'},
@@ -59,7 +48,7 @@ _WELCOME = {
 def telegram_pair_complete(request, *args, **kwargs):
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    if not _check_internal_auth(request):
+    if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
 
     body = _json_body(request)
@@ -116,6 +105,21 @@ def telegram_pair_complete(request, *args, **kwargs):
 
     author = row['issued_by_sabun'] or 'tel_router-pair'
     patch_team_config(client, team_id, patch, author)
+
+    if channel_type == 'prospect':
+        try:
+            refresh_prospect_dashboard(client, team_id, allow_create=True)
+        except Exception:
+            logging.getLogger('api.views.telegram_pair_internal').warning(
+                '[telegram_pair_complete] prospect dashboard initial send failed', exc_info=True,
+            )
+    elif channel_type == 'matching':
+        try:
+            refresh_matching_dashboard(client, team_id, allow_create=True)
+        except Exception:
+            logging.getLogger('api.views.telegram_pair_internal').warning(
+                '[telegram_pair_complete] matching dashboard initial send failed', exc_info=True,
+            )
 
     # TEAMS.DISPLAY_NAME이 없는 프로젝트라 팀 이름 자리엔 TEAM_ID(REGION_CODE) 그대로.
     team_name = team_id

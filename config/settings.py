@@ -64,6 +64,14 @@ TELEGRAM_BOT_USERNAME = config('TELEGRAM_BOT_USERNAME', default='')
 # 채널 연결 완료 환영 메시지의 딥링크 버튼(예: "매칭 절대지켜! 🛡️")에 붙는 베이스 URL.
 MY_TELEGRAM_LINK = config('MY_TELEGRAM_LINK', default='')
 
+# main → tel_router_py 로 발송을 요청할 때 쓰는 대상 주소/시크릿 — tel_router_py 쪽
+# ENQUEUE_SECRET과 반드시 같은 값이어야 함.
+TEL_ROUTER_URL = config('TEL_ROUTER_URL', default='')
+TEL_ROUTER_ENQUEUE_SECRET = config('TEL_ROUTER_ENQUEUE_SECRET', default='')
+# 합재양 카드 인라인 버튼(답장/창개설/재가) callback_data 서명 — tel_router_py의
+# TG_CALLBACK_HMAC_SECRET과 반드시 같은 값이어야 함.
+TG_CALLBACK_HMAC_SECRET = config('TG_CALLBACK_HMAC_SECRET', default='')
+
 # Application definition
 
 INSTALLED_APPS = [

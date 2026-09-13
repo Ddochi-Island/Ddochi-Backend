@@ -1,6 +1,7 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
 import hashlib
 import json
+import logging
 import re
 import time
 import uuid
@@ -11,6 +12,8 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient
+from api.telegram.habjaeyang import send_habjaeyang_to_telegram
+from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 
 
 def _json_body(request):
@@ -235,7 +238,10 @@ def get_assets(request, *args, **kwargs):
             'place': m['match_location'] or '',
             'outcome': (f"{_MATCH_RESULT_ICON.get(m['result'], '')}{m['sub_reason_label'] or m['result_label']}") if m['result'] else None,
             'attended': None,
-        } for m in hist]
+            # 직전 시도가 2차만남으로 넘어간 결과였으면 이 만남이 바로 그 2차만남 자리.
+            'isSecondMeet': bool(i > 0 and hist[i - 1]['result'] == 'SECOND_MEET'),
+        } for i, m in enumerate(hist)]
+        is_latest_second_meet = bool(len(hist) >= 2 and hist[-2]['result'] == 'SECOND_MEET')
 
         entries = logs_by_id.get(sid, [])
         has_hj = bool(r['hab_jae_yang_id'])
@@ -267,6 +273,7 @@ def get_assets(request, *args, **kwargs):
                 'mtDate': (latest['mt_date'] or '미정') if latest else (r['mt_date'] or ''),
                 'mtTime': (latest['mt_time'] or '') if latest else (r['mt_time'] or ''),
                 'mtPlace': (latest['match_location'] or '') if latest else (r['match_location'] or ''),
+                'isSecondMeet': is_latest_second_meet if latest else False,
                 'mbti': r['mbti'] or '',
                 'nearSt': r['residence_station'] or '',
                 'job': r['school_major_job'] or '',
@@ -323,7 +330,10 @@ def get_matching_history(request, *args, **kwargs):
                   smh.MATCH_LOCATION, smh.RESULT, mrc.LABEL AS RESULT_LABEL, msrc.LABEL AS SUB_REASON_LABEL,
                   spi.NAME, im.NAME AS MANAGER_NAME, gm.NAME AS GUIDE_NAME,
                   COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME,
-                  hj.APPROVAL_STATUS
+                  hj.APPROVAL_STATUS,
+                  CASE WHEN LAG(smh.RESULT) OVER (
+                         PARTITION BY smh.SARANG_ID ORDER BY smh.MATCH_DEGREE, smh.ATTEMPT_COUNT
+                       ) = 'SECOND_MEET' THEN 1 ELSE 0 END AS IS_SECOND_MEET
              FROM SARANG_MATCH_HISTORIES smh
              JOIN SARANG s ON s.SARANG_ID = smh.SARANG_ID
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
@@ -335,11 +345,20 @@ def get_matching_history(request, *args, **kwargs):
              LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = smh.RESULT
              LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
             WHERE mah.REGION_CODE = :1
-              AND smh.MATCHED_AT >= TO_DATE(:2, 'YYYY-MM-DD')
-              AND smh.MATCHED_AT <  TO_DATE(:3, 'YYYY-MM-DD') + 1
-            ORDER BY smh.MATCHED_AT""",
+              -- LAG()는 팀/날짜로 좁히기 전, 그 사람의 전체 매칭 이력을 봐야 정확함
+              -- (직전 시도가 조회 범위 밖 날짜일 수 있어서) — 그래서 WHERE가 아니라
+              -- 윈도우 함수 자체는 전체를 보고, 결과 필터링만 날짜로 함.
+              AND smh.SARANG_ID IN (
+                SELECT SARANG_ID FROM SARANG_MATCH_HISTORIES
+                 WHERE MATCHED_AT >= TO_DATE(:2, 'YYYY-MM-DD') AND MATCHED_AT < TO_DATE(:3, 'YYYY-MM-DD') + 1
+              )
+            ORDER BY s.SARANG_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT""",
         [team_id, start_date, end_date],
     )
+    # 위 서브쿼리는 "이 사람이 이 기간에 매칭 이력이 있는지"만 걸러서 SARANG_ID
+    # 단위로 전체 이력을 가져옴 — LAG()가 정확해지는 대신, 화면에 낼 땐 실제
+    # 날짜 범위 안에 있는 행만 다시 걸러야 함.
+    rows = [r for r in rows if r['mt_date'] and start_date <= r['mt_date'] <= end_date]
 
     meetings = []
     for r in rows:
@@ -350,6 +369,9 @@ def get_matching_history(request, *args, **kwargs):
             'meetingId': r['match_id'],
             'date': r['mt_date'] or '',
             'time': r['mt_time'] or '',
+            # ✌️는 프론트가 표시할 때만 앞에 붙임 — time 자체를 건드리면 화면의
+            # 시간순 정렬(localeCompare)이 이모지 때문에 깨짐.
+            'isSecondMeet': r['is_second_meet'] == '1',
             'outcome': outcome,
             'place': r['match_location'] or '',
             'docId': r['sarang_id'],
@@ -485,6 +507,12 @@ def update_match(request, *args, **kwargs):
         "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
         [result_val, sub_reason, cur['match_id']],
     )
+    try:
+        refresh_matching_dashboard_for_sarang(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning(
+            '[update_match:status] matching dashboard refresh failed', exc_info=True,
+        )
     return JsonResponse({'success': True, 'message': '결과가 입력됐어!'})
 
 
@@ -620,6 +648,10 @@ def submit_result(request, *args, **kwargs):
                 'args': [near_st, sarang_id],
             })
         client.tx(stmts)
+        try:
+            send_habjaeyang_to_telegram(client, sarang_id)
+        except Exception:
+            logging.getLogger('api.views.assets').warning('[submit_result] telegram send failed', exc_info=True)
     else:
         return JsonResponse({'success': False, 'message': f'아직 지원 안 되는 처리예요: {log_type}'}, status=400)
 
@@ -683,20 +715,34 @@ def toggle_hj_status(request, *args, **kwargs):
     if not sarang_id or field not in ('replied', 'windowOpened'):
         return JsonResponse({'success': False, 'message': 'invalid request'}, status=400)
 
-    col = 'HAS_REPLIED' if field == 'replied' else 'IS_WINDOW_OPENED'
     client = DataRouterClient()
+    new_val = _toggle_hj_field(client, sarang_id, 'HAS_REPLIED' if field == 'replied' else 'IS_WINDOW_OPENED')
+    if new_val is None:
+        return JsonResponse({'success': False, 'message': '활성 합재양 없음'}, status=404)
+
+    try:
+        send_habjaeyang_to_telegram(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[toggle_hj_status] telegram refresh failed', exc_info=True)
+
+    return JsonResponse({'success': True, 'value': bool(new_val)})
+
+
+def _toggle_hj_field(client, sarang_id, col):
+    """toggle_hj_status(앱 UI)와 텔레그램 인라인 버튼(💬 답장/🚪 창개설)이 공유하는 토글 본체.
+    반환: 활성 합재양이 없으면 None, 있으면 새 값(0/1)."""
     cur = client.query_one(
         f"SELECT {col} AS V FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
         [sarang_id],
     )
     if not cur:
-        return JsonResponse({'success': False, 'message': '활성 합재양 없음'}, status=404)
+        return None
     new_val = 0 if cur['v'] == '1' else 1
     client.exec(
         f"UPDATE SARANG_HAB_JAE_YANG SET {col} = :1 WHERE SARANG_ID = :2 AND IS_ACTIVE = 1",
         [new_val, sarang_id],
     )
-    return JsonResponse({'success': True, 'value': bool(new_val)})
+    return new_val
 
 
 @csrf_exempt
@@ -799,33 +845,24 @@ def edit_match(request, *args, **kwargs):
     else:
         return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'})
 
+    if edit_type in ('teacher', 'date', 'subGuide'):
+        try:
+            refresh_matching_dashboard_for_sarang(client, sarang_id)
+        except Exception:
+            logging.getLogger('api.views.assets').warning('[edit_match] matching dashboard refresh failed', exc_info=True)
+
     return JsonResponse({'success': True, 'message': '반영 완료!'})
 
 
-@csrf_exempt
-@require_jwt
-def update_approval(request, *args, **kwargs):
-    """합재양 재가/반려 처리 — 매칭 절대 지켜! 🔒 버튼 뒤의 결정 팝업(showApprDecisionPopup)."""
-    if request.method not in ['POST']:
-        return JsonResponse({"error": "method_not_allowed"}, status=405)
-
-    body = _json_body(request)
-    sarang_id = str(body.get('rowIndex') or '').strip()
-    status_ko = str(body.get('status') or '').strip()
-    reason = str(body.get('reason') or '').strip()[:500]
-    status_map = {'재가': 'approved', '반려': 'rejected'}
-    enum_val = status_map.get(status_ko)
-    if not sarang_id or not enum_val:
-        return JsonResponse({'success': False, 'message': 'rowIndex, status 필요'}, status=400)
-
-    sabun = request.user['sabun']
-    client = DataRouterClient()
+def _set_habjaeyang_approval(client, sarang_id, sabun, enum_val, reason=None):
+    """합재양 재가/반려 처리 본체 — update_approval(앱 UI)과 텔레그램 인라인 버튼(🛡️ 재가)이 공유.
+    반환: hj row가 없으면 None, 처리했으면 {'habJaeYangId': ...}."""
     hj = client.query_one(
         "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
         [sarang_id],
     )
     if not hj:
-        return JsonResponse({'success': False, 'message': '활성 합재양이 없어요'}, status=404)
+        return None
 
     event_type = '재가처리' if enum_val == 'approved' else '반려처리'
     stmts = [
@@ -852,6 +889,41 @@ def update_approval(request, *args, **kwargs):
                 'args': [uuid.uuid4().hex.upper(), hj['hab_jae_yang_id']],
             })
     client.tx(stmts)
+    return {'habJaeYangId': hj['hab_jae_yang_id']}
+
+
+@csrf_exempt
+@require_jwt
+def update_approval(request, *args, **kwargs):
+    """합재양 재가/반려 처리 — 매칭 절대 지켜! 🔒 버튼 뒤의 결정 팝업(showApprDecisionPopup)."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    status_ko = str(body.get('status') or '').strip()
+    reason = str(body.get('reason') or '').strip()[:500]
+    status_map = {'재가': 'approved', '반려': 'rejected'}
+    enum_val = status_map.get(status_ko)
+    if not sarang_id or not enum_val:
+        return JsonResponse({'success': False, 'message': 'rowIndex, status 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+    if _set_habjaeyang_approval(client, sarang_id, sabun, enum_val, reason) is None:
+        return JsonResponse({'success': False, 'message': '활성 합재양이 없어요'}, status=404)
+
+    try:
+        send_habjaeyang_to_telegram(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[update_approval] telegram refresh failed', exc_info=True)
+
+    if enum_val == 'approved':
+        try:
+            refresh_matching_dashboard_for_sarang(client, sarang_id)
+        except Exception:
+            logging.getLogger('api.views.assets').warning('[update_approval] matching dashboard refresh failed', exc_info=True)
+
     return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
 
 
@@ -914,6 +986,12 @@ def postpone_meeting(request, *args, **kwargs):
             'args': [uuid.uuid4().hex.upper(), sarang_id, next_degree, next_attempt, cur['match_location'], cur['teacher_member_id']],
         })
     client.tx(stmts)
+
+    try:
+        refresh_matching_dashboard_for_sarang(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[postpone_meeting] matching dashboard refresh failed', exc_info=True)
+
     return JsonResponse({'success': True, 'message': f'{log_type} 처리 완료!'})
 
 
@@ -934,11 +1012,121 @@ def get_center_assets(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def submit_habjaeyang_new(request, *args, **kwargs):
-    # TODO: services/main/src/routes/assets.js 의 POST /submit-habjaeyang-new 포팅
+    """기존 TM 리드 없이 합재양 작성 화면에서 바로 새 사랑이(SARANG)를 만드는 경로.
+    submit_result의 '합재양작성' 분기(기존 SARANG_ID가 있는 경우)와 짝을 이룸 —
+    컬럼 매핑은 그쪽과 동일하게 맞춤. ponytail: 레거시에 있던 동일 전화번호
+    중복섭외 감지/팝업(habjaeyang-dup-resolve)은 이 스키마엔 PROSPECTS.IS_DROPPED가
+    없어서(get_shed_prospects 주석 참고) 표현 방식부터 다시 설계해야 함 — 일단 항상
+    새로 등록만 하고, 필요해지면 추가."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+    body = _json_body(request)
+    hj = (body.get('data') or {}).get('habjaeyang') or {}
+
+    name = str(hj.get('subName') or '').strip()
+    phone_raw = str(hj.get('contact') or '').strip()
+    phone_normalized = re.sub(r'[^0-9]', '', phone_raw)
+    if not name:
+        return JsonResponse({'success': False, 'message': '이름을 입력해줘!'}, status=400)
+    if len(phone_normalized) < 10:
+        return JsonResponse({'success': False, 'message': '연락처를 올바르게 입력해줘!'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    guide_id = _member_id_by_name(client, hj.get('guide'))
+    caller_id = _member_id_by_name(client, hj.get('tmName'))
+    inflow_member_id = guide_id or sabun
+
+    path_val = str(hj.get('path') or '').strip() or None
+    tool_val = str(hj.get('tool') or '').strip() or None
+    recruitment_type = 'ONLINE'
+    if path_val:
+        path_cfg = client.query_one(
+            "SELECT ON_OFF FROM PATH_CONFIGS WHERE NAME = :1 AND DELETED_AT IS NULL FETCH FIRST 1 ROWS ONLY",
+            [path_val],
+        )
+        if path_cfg:
+            recruitment_type = path_cfg['on_off'].upper()
+
+    mt_date = str(hj.get('mtDate') or '').strip()
+    mt_time = str(hj.get('mtTime') or '').strip()
+    mt_datetime = f'{mt_date}T{mt_time}' if mt_date and mt_time else None
+
+    age_raw = str(hj.get('age') or '').strip()
+    age_num = int(age_raw) if age_raw.isdigit() else None
+    gender = str(hj.get('gender') or '').strip()
+    gender = gender if gender in ('남', '여') else None
+    mbti = str(hj.get('mbti') or '').strip() or None
+
+    personal_info_id = hashlib.sha256(f'{name}|{phone_normalized}'.encode('utf-8')).hexdigest()
+    sarang_id = uuid.uuid4().hex.upper()
+
+    stmts = []
+    existing_pi = client.query_one(
+        "SELECT PERSONAL_INFO_ID FROM SARANG_PERSONAL_INFO WHERE PERSONAL_INFO_ID = :1", [personal_info_id]
+    )
+    if not existing_pi:
+        stmts.append({
+            'sql': """INSERT INTO SARANG_PERSONAL_INFO (PERSONAL_INFO_ID, NAME, PHONE, PHONE_NORMALIZED, RESIDENCE_STATION)
+                      VALUES (:1, :2, :3, :4, :5)""",
+            'args': [personal_info_id, name, phone_raw, phone_normalized, str(hj.get('nearSt') or '').strip() or None],
+        })
+
+    stmts.append({
+        'sql': """INSERT INTO SARANG
+                    (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, GENDER, MBTI, STAGE,
+                     RECRUITMENT_TYPE, INFLOW_DATE, CURRENT_PROCESS, CREATED_BY, UPDATED_BY)
+                  VALUES (:1, :2, :3, :4, :5, :6, '합재양', :7, SYSTIMESTAMP, '합재양', :8, :8)""",
+        'args': [sarang_id, personal_info_id, inflow_member_id, age_num, gender, mbti, recruitment_type, sabun],
+    })
+
+    stmts.append({
+        'sql': """INSERT INTO SARANG_HAB_JAE_YANG
+                    (HAB_JAE_YANG_ID, SARANG_ID, GUIDE_MEMBER_ID, CALLER_MEMBER_ID, ROUTE, TOOL, IS_VERBAL_MEET,
+                     MATCH_SCHEDULED_AT, MATCH_LOCATION,
+                     GWACHEON_TRAVEL_TIME, GWACHEON_TRANSFER_COUNT, CENTER_TRAVEL_TIME, CENTER_TRANSFER_COUNT,
+                     SCHOOL_MAJOR_JOB, SCHEDULE, ENVIRONMENT_1Y, APPLICATION_PURPOSE,
+                     SELF_IMAGE, DESIRED_IMAGE, CHARACTER_NOTE, ALERT_NOTE, DISTANCE_BURDEN,
+                     QNA, ETC,
+                     HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS)
+                  VALUES (:1, :2, :3, :4, :5, :6, :7,
+                          CASE WHEN :8 IS NOT NULL THEN TO_TIMESTAMP(:9, 'YYYY-MM-DD"T"HH24:MI') END, :10,
+                          :11, :12, :13, :14,
+                          :15, :16, :17, :18,
+                          :19, :20, :21, :22, :23,
+                          :24, :25, :26, :27, :28)""",
+        'args': [
+            uuid.uuid4().hex.upper(), sarang_id, guide_id, caller_id, path_val, tool_val, _ox(hj.get('verbalManFix')),
+            mt_datetime, mt_datetime, str(hj.get('mtPlace') or '').strip() or None,
+            _parse_min_label(hj.get('gwacheonMin')), _parse_transfer_label(hj.get('gwacheonTransfer')),
+            _parse_min_label(hj.get('centerMin')), _parse_transfer_label(hj.get('centerTransfer')),
+            str(hj.get('job') or '').strip() or None, str(hj.get('sch') or '').strip() or None,
+            str(hj.get('plan') or '').strip() or None, str(hj.get('purpose') or '').strip() or None,
+            str(hj.get('selfImage') or '').strip() or None, str(hj.get('trouble') or '').strip() or None,
+            str(hj.get('att') or '').strip() or None, str(hj.get('wary') or '').strip() or None,
+            str(hj.get('dist') or '').strip() or None,
+            str(hj.get('qna') or '').strip() or None, str(hj.get('etc') or '').strip() or None,
+            _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
+        ],
+    })
+
+    stmts.append({
+        'sql': "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE) VALUES (:1, :2, :3, '합재양작성')",
+        'args': [uuid.uuid4().hex.upper(), sarang_id, sabun],
+    })
+
+    client.tx(stmts)
+
+    try:
+        send_habjaeyang_to_telegram(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[submit_habjaeyang_new] telegram send failed', exc_info=True)
+
+    return JsonResponse({'success': True, 'message': '✅ 저장 완료!', 'prospectId': sarang_id})
 
 
 @csrf_exempt
@@ -1138,7 +1326,10 @@ def get_shed_prospects(request, *args, **kwargs):
     """schema-spec.md(Sarang Domain) 기준 재구현. 질적 찾기(2/4/6팀)·선한 양치기
     (1/3/5팀)는 프론트에서 inflow_member의 현재 소속팀으로 묶어서 보여주는
     구분이라(같은 화면에 3개 팀이 같이 보임), 서버는 팀으로 좁히지 않고 전체를
-    반환하면서 각 항목에 team을 실어준다."""
+    반환하면서 각 항목에 team을 실어준다.
+    SARANG_INFLOW_DETAILS를 INNER JOIN — 이 화면은 사쉐 번호찾(shed_register)으로
+    들어온 건만 다루는 화면이라, 합재양 작성에서 바로 등록된 건(그 테이블에 행이
+    안 생김)은 여기서 아예 빠져야 함."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -1157,7 +1348,7 @@ def get_shed_prospects(request, *args, **kwargs):
              JOIN MEMBERS m ON m.MEMBER_ID = s.INFLOW_MEMBER_ID
              JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-             LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
              LEFT JOIN SARANG_HAB_JAE_YANG shjy ON shjy.SARANG_ID = s.SARANG_ID AND shjy.IS_ACTIVE = 1
              LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = shjy.GUIDE_MEMBER_ID

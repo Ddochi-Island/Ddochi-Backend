@@ -37,6 +37,23 @@ def patch_team_config(client, team_id, patch, author):
     )
 
 
+def list_prospect_chat_team_ids(client):
+    """prospectChatId(또는 matchingChatId)가 설정된 팀 목록 — 정각 크론이 순회할 대상."""
+    rows = client.query(
+        "SELECT TEAM_ID, CONFIG FROM BROADCAST_SETTINGS WHERE BROADCAST_TYPE = :1 AND DELETED_AT IS NULL",
+        [BROADCAST_TYPE],
+    )
+    out = []
+    for r in rows:
+        try:
+            cfg = json.loads(r['config']) if r['config'] else {}
+        except (TypeError, ValueError):
+            cfg = {}
+        if cfg.get('prospectChatId') or cfg.get('matchingChatId'):
+            out.append(r['team_id'])
+    return out
+
+
 def load_all_team_configs(client, team_ids):
     if not team_ids:
         return {}

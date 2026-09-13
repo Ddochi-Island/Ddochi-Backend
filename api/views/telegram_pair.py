@@ -23,7 +23,7 @@ CHANNEL_DEFS = {
     'dashboard':       {'field': 'chatId', 'label': '대시보드', 'lastMsgIdField': 'lastMessageId'},
     'stats':           {'field': 'statsChatId', 'label': '통계', 'lastMsgIdField': 'lastStatsMsgId'},
     'prayer':          {'field': 'prayerChatId', 'label': '기도문'},
-    'matching':        {'field': 'matchingChatId', 'label': '매칭전광판', 'lastMsgIdField': 'lastMatchingMsgId'},
+    'matching':        {'field': 'matchingChatId', 'label': '매칭현황판', 'lastMsgIdField': 'lastMatchingMsgId'},
     'prospect':        {'field': 'prospectChatId', 'label': '찾기현황판', 'lastMsgIdField': 'lastProspectMsgId'},
     'feedback':        {'field': 'feedbackChatId', 'label': '매칭피드백', 'lastMsgIdField': 'lastFeedbackMsgId'},
     'returnHome':      {'field': 'returnHomeChatId', 'label': '귀소할일'},
