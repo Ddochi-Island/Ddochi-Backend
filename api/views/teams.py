@@ -116,7 +116,7 @@ def save_tool_config(request, *args, **kwargs):
                 'success': False, 'code': 'name_conflict', 'message': '같은 이름의 도구가 이미 있어',
                 'existing': [{
                     'id': r['tool_config_id'], 'teamId': r['team_id'] or None,
-                    'teamLabel': (r['team_id'] + '팀') if r['team_id'] else '공용',
+                    'teamLabel': (r['team_id'] + '지역') if r['team_id'] else '공용',
                 } for r in dup_rows],
             })
 
