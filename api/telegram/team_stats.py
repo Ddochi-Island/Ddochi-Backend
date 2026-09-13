@@ -5,8 +5,8 @@
 #   재가 = SARANG_ACTIVITY_LOGS(EVENT_TYPE='재가처리'), 오프번찾 = SARANG_INFLOW_DETAILS
 #   가 있는(=사쉐/번호찾 경로) 오늘 유입, 구역 = MEMBER_AFFILIATION_HISTORIES.DISTRICT_CODE,
 #   구역장/부구역장 = MEMBER_POSITION_MAPPINGS(area_lead/sub_area_lead).
-# 잎사귀(DAILY_REPORT_LEAVES)와 영업일(22시 롤오버)은 이 리라이트에 대응 데이터가
-# 없어 뺐음 — 잎사귀 섹션은 항상 "없습니다" 고정.
+# 잎사귀(DAILY_REPORT_LEAVES)는 이 리라이트에 대응 데이터가 없어 뺐음 — 섹션은
+# 항상 "없습니다" 고정. 22시 영업일 롤오버는 api/util/business_date.py로 그대로 적용.
 import datetime
 import logging
 
@@ -14,6 +14,7 @@ from api.telegram import tel_router_client
 from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.team_config import load_team_config
 from api.telegram.team_goals import load_team_goal_total
+from api.util.business_date import BUSINESS_DAY_BOUNDARY_HOUR, get_dashboard_biz_date
 
 logger = logging.getLogger('api.telegram.team_stats')
 
@@ -181,7 +182,14 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, distr
     unreported = [ld['name'] for ld in leaders if ld['name'] not in reported_names]
 
     # ── 조립 ────────────────────────────────────────────────────
-    lines = [f'🔥 {region_code}! 오늘의 추수', f"- {_fmt_md(date_str)} {now.strftime('%H:%M')} 기준", '']
+    plain_today = now.date().isoformat()
+    if now.hour == BUSINESS_DAY_BOUNDARY_HOUR:
+        date_line = f'- {_fmt_md(plain_today)} 22:00(마감)'
+    elif date_str > plain_today:
+        date_line = f'- {_fmt_md(date_str)} 사전보고'
+    else:
+        date_line = f"- {_fmt_md(date_str)} {now.strftime('%H:%M')} 기준"
+    lines = [f'🔥 {region_code}! 오늘의 추수', date_line, '']
     lines.append('[팀 목표 달성률]')
     metrics = [
         ('🗣️', '말걺', talk, goals['talk']),
@@ -266,9 +274,10 @@ def _build_message(client, region_code, date_str):
 
 
 def refresh_team_stats(client, region_code, date_str=None):
-    """일일보고 제출 직후 훅 — 기존 메시지가 있을 때만 edit, 없으면 조용히 skip
-    (새 메시지 발송은 정각 크론(send_fresh_team_stats) 몫)."""
-    date_str = date_str or datetime.date.today().isoformat()
+    """일일보고 제출 직후 훅 — 기존 메시지가 "오늘"(date_str과 같은 영업일) 걸일
+    때만 edit, 없거나 날짜가 다르면(이미 마감된 전날 기록) 조용히 skip — 새 메시지
+    발송은 정각 크론(send_fresh_team_stats) 몫."""
+    date_str = date_str or get_dashboard_biz_date(datetime.datetime.now().hour)
     cfg = load_team_config(client, region_code)
     chat_id = cfg.get('statsChatId')
     if not chat_id:
@@ -277,6 +286,8 @@ def refresh_team_stats(client, region_code, date_str=None):
     previous_msg_id = cfg.get('lastStatsMsgId')
     if not previous_msg_id:
         return {'skipped': True, 'reason': 'no_existing_message'}
+    if cfg.get('lastStatsMsgDate') != date_str:
+        return {'skipped': True, 'reason': 'previous_day_record'}
 
     text = _build_message(client, region_code, date_str)
     try:
@@ -298,7 +309,7 @@ def send_fresh_team_stats(client, region_code):
     """정각 크론 전용 — 매번 새 메시지로 발송. 같은 날 안에서는 직전 메시지를
     삭제하지만, 날짜가 바뀐 뒤 첫 발송이면 전날 마지막 메시지는 하루치 기록으로
     남겨두고 지우지 않음(dashboard_send.send_fresh_dashboard)."""
-    date_str = datetime.date.today().isoformat()
+    date_str = get_dashboard_biz_date(datetime.datetime.now().hour)
     cfg = load_team_config(client, region_code)
     chat_id = cfg.get('statsChatId')
     if not chat_id:

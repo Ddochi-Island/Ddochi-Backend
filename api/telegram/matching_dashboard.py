@@ -6,7 +6,7 @@ import datetime
 import logging
 
 from api.telegram import tel_router_client
-from api.telegram.dashboard_send import send_fresh_dashboard
+from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
 from api.telegram.team_config import load_team_config, patch_team_config
 
 logger = logging.getLogger('api.telegram.matching_dashboard')
@@ -114,7 +114,11 @@ def _dashboard_reply_markup():
 
 def refresh_matching_dashboard(client, team_id, allow_create=True):
     """매칭현황판 리스트 갱신 — prospect_dashboard.refresh_prospect_dashboard와 동일한
-    edit-우선/allow_create 패턴. 정각 크론은 아직 없음(요청 시 prospect_dashboard처럼 추가)."""
+    edit-우선/allow_create 패턴. 06~23시 발송 시간대 밖이면 웹 이벤트로 인한 갱신도
+    건너뜀 — 그 시간대 메시지는 전날 마감 기록이라 더 이상 안 건드림."""
+    if not in_broadcast_window():
+        return {'skipped': True, 'reason': 'outside_broadcast_window'}
+
     cfg = load_team_config(client, team_id)
     chat_id = cfg.get('matchingChatId')
     if not chat_id:

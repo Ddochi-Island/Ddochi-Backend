@@ -1,7 +1,6 @@
 """dailyReport.js 포팅 대상 — daily_report 라우트 스텁 (구조만, 로직은 미구현).
 daily_report/daily_report_get/daily_report_list_names 셋만 실제 구현 — 나머지(주간
 계획/plan-execution/reflections 등)는 별개의 "일일 계획" 서브시스템이라 범위 밖."""
-import datetime
 import json
 import logging
 
@@ -10,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient
+from api.util.business_date import get_business_date
 from api.views.assets import _member_id_by_name
 
 logger = logging.getLogger('api.views.daily_report')
@@ -22,10 +22,6 @@ def _json_body(request):
         return {}
 
 
-def _today_kst():
-    return datetime.date.today().isoformat()
-
-
 @csrf_exempt
 @require_jwt
 def daily_report_list_names(request, *args, **kwargs):
@@ -35,7 +31,7 @@ def daily_report_list_names(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
     body = _json_body(request)
-    date_key = str(body.get('dateKey') or '').strip() or _today_kst()
+    date_key = str(body.get('dateKey') or '').strip() or get_business_date()
 
     client = DataRouterClient()
     ctx = get_author_context(request.user['sabun'])
@@ -61,7 +57,7 @@ def daily_report_get(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
     body = _json_body(request)
-    date_key = str(body.get('dateKey') or body.get('date') or '').strip() or _today_kst()
+    date_key = str(body.get('dateKey') or body.get('date') or '').strip() or get_business_date()
     name = str(body.get('name') or '').strip()
     if not name:
         return JsonResponse({'success': False, 'message': 'name 필요'}, status=400)
@@ -111,7 +107,7 @@ def daily_report(request, *args, **kwargs):
 
     body = _json_body(request)
     name = str(body.get('name') or '').strip()
-    date_key = str(body.get('dateKey') or body.get('confirmedDateKey') or '').strip() or _today_kst()
+    date_key = str(body.get('dateKey') or body.get('confirmedDateKey') or '').strip() or get_business_date()
     activity = str(body.get('activity') or 'none').strip()
     if not name:
         return JsonResponse({'success': False, 'message': 'name 필요'}, status=400)

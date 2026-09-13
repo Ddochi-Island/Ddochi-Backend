@@ -12,6 +12,12 @@ from api.telegram.team_config import patch_team_config
 logger = logging.getLogger('api.telegram.dashboard_send')
 
 
+def in_broadcast_window(start_hour=6, end_hour=23):
+    """정각 발송 시간대(06~23시) 밖이면 웹 이벤트로 인한 edit도 건너뜀 — 그 시간대
+    바깥에 떠 있는 메시지는 전날의 마감 기록이라 더 이상 손대지 않기 위함."""
+    return start_hour <= datetime.datetime.now().hour <= end_hour
+
+
 def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, msg_id_field, msg_date_field, log_tag):
     """cfg는 호출부가 이미 조회해둔 team config — chat_id/이전 메시지 정보 재사용."""
     today = datetime.date.today().isoformat()

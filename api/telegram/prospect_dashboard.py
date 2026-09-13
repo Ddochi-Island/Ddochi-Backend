@@ -8,7 +8,7 @@ import datetime
 import logging
 
 from api.telegram import tel_router_client
-from api.telegram.dashboard_send import send_fresh_dashboard
+from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
 from api.telegram.team_config import load_team_config, patch_team_config
 
 logger = logging.getLogger('api.telegram.prospect_dashboard')
@@ -142,7 +142,12 @@ def _dashboard_reply_markup():
 
 def refresh_prospect_dashboard(client, team_id, allow_create=True):
     """찾기현황판 리스트 갱신. allow_create=False면 기존 메시지가 있을 때만 edit하고
-    없으면 조용히 skip(버튼 토글처럼 가벼운 이벤트에서 새 메시지를 만들지 않기 위함)."""
+    없으면 조용히 skip(버튼 토글처럼 가벼운 이벤트에서 새 메시지를 만들지 않기 위함).
+    06~23시 발송 시간대 밖이면 웹 이벤트로 인한 갱신도 건너뜀 — 그 시간대 메시지는
+    전날 마감 기록이라 더 이상 안 건드림(정각 크론이 06시에 새로 시작)."""
+    if not in_broadcast_window():
+        return {'skipped': True, 'reason': 'outside_broadcast_window'}
+
     cfg = load_team_config(client, team_id)
     chat_id = cfg.get('prospectChatId') or cfg.get('matchingChatId')
     if not chat_id:
