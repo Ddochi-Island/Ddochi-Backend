@@ -30,7 +30,6 @@ def _json_body(request):
 # TEAM_ID(REGION_CODE) 코드값을 그대로 씀.
 _WELCOME = {
     'dashboard':       {'text': lambda t: f'👋 [{t}] 또치섬 대시보드가 연결되었어!', 'button': ('입국하기 🛫', '?startapp=dailyReport')},
-    'stats':           {'text': lambda t: f'📈 [{t}] 통계 알림방이 연결되었어!'},
     'prayer':          {'text': lambda t: f'🙏 [{t}] 향연(기도문) 방이 연결되었어! 이제 이곳에 향연이 피어오를거야.', 'button': ('🙏 향 붙이러 가기', '?startapp=prayer')},
     'feedback':        {'text': lambda t: f'📋 [{t}] 매칭피드백 방이 연결되었어!', 'button': ('센터 가보자! 🏃', '?startapp=center')},
     'returnHome':      {'text': lambda t: f'🏠 [{t}] 귀소할일 알림방이 연결되었어!'},

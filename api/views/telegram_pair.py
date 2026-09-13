@@ -21,7 +21,7 @@ TTL_MINUTES = 10
 # 직접 발송하므로 telegram_pair_internal.py 쪽에 둠 — 여기선 field/label/lastMsgIdField만).
 CHANNEL_DEFS = {
     'dashboard':       {'field': 'chatId', 'label': '대시보드', 'lastMsgIdField': 'lastMessageId'},
-    'stats':           {'field': 'statsChatId', 'label': '통계', 'lastMsgIdField': 'lastStatsMsgId'},
+    'stats':           {'field': 'statsChatId', 'label': '일일보고', 'lastMsgIdField': 'lastStatsMsgId'},
     'prayer':          {'field': 'prayerChatId', 'label': '기도문'},
     'matching':        {'field': 'matchingChatId', 'label': '매칭현황판', 'lastMsgIdField': 'lastMatchingMsgId'},
     'prospect':        {'field': 'prospectChatId', 'label': '찾기현황판', 'lastMsgIdField': 'lastProspectMsgId'},
