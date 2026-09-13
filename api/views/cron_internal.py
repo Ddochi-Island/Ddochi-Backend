@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.clients.data_router import DataRouterClient
 from api.telegram.internal_auth import check_internal_auth
+from api.telegram.matching_dashboard import send_fresh_matching_dashboard
 from api.telegram.prospect_dashboard import send_fresh_prospect_dashboard
 from api.telegram.team_config import list_prospect_chat_team_ids
 
@@ -126,10 +127,21 @@ def send_feedback_dashboard(request, *args, **kwargs):
 
 @csrf_exempt
 def send_matching_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-matching-dashboard 포팅
+    """정각 크론 — 매칭현황판 연결된 팀마다 새 메시지를 보내고 직전 메시지를 지운다.
+    send_prospect_dashboard와 동일 패턴."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+
+    client = DataRouterClient()
+    results = {}
+    for team_id in list_prospect_chat_team_ids(client):
+        try:
+            results[team_id] = send_fresh_matching_dashboard(client, team_id)
+        except Exception as e:
+            results[team_id] = {'sent': False, 'error': str(e)}
+    return JsonResponse({'success': True, 'results': results})
 
 
 @csrf_exempt

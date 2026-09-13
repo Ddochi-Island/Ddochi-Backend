@@ -159,6 +159,47 @@ def refresh_matching_dashboard(client, team_id, allow_create=True):
     return {'sent': True, 'edited': False}
 
 
+def send_fresh_matching_dashboard(client, team_id):
+    """정각 크론 전용 — prospect_dashboard.send_fresh_prospect_dashboard와 동일 패턴:
+    매번 새 메시지로 발송하고 성공하면 직전 메시지를 삭제."""
+    cfg = load_team_config(client, team_id)
+    chat_id = cfg.get('matchingChatId')
+    if not chat_id:
+        return {'skipped': True, 'reason': 'no_chat_id'}
+
+    rows = _fetch_rows(client, team_id)
+    text = _build_text(team_id, rows)
+
+    try:
+        result = tel_router_client.enqueue(
+            'sendMessage',
+            {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': _dashboard_reply_markup()},
+            await_result=True,
+        )
+    except Exception:
+        logger.warning('[matching_dashboard] send_fresh sendMessage failed', exc_info=True)
+        return {'sent': False}
+
+    if not result.get('ok'):
+        logger.warning('[matching_dashboard] send_fresh sendMessage rejected: %s', result.get('description'))
+        return {'sent': False}
+
+    new_msg_id = result.get('result', {}).get('message_id')
+    if not new_msg_id:
+        return {'sent': True, 'deletedPrevious': False}
+
+    previous_msg_id = cfg.get('lastMatchingMsgId')
+    patch_team_config(client, team_id, {'lastMatchingMsgId': new_msg_id}, 'system')
+
+    if previous_msg_id and str(previous_msg_id) != str(new_msg_id):
+        try:
+            tel_router_client.enqueue('deleteMessage', {'chat_id': chat_id, 'message_id': previous_msg_id})
+        except Exception:
+            logger.warning('[matching_dashboard] delete previous message failed', exc_info=True)
+
+    return {'sent': True, 'newMessageId': new_msg_id, 'deletedPrevious': bool(previous_msg_id)}
+
+
 def refresh_matching_dashboard_for_sarang(client, sarang_id):
     """호출부가 team_id를 모를 때 쓰는 편의 함수 — 결과입력/재가/날짜수정 같은
     sarang_id 단위 이벤트 훅에서 바로 부를 수 있게 INFLOW_MEMBER_ID로 team을 resolve."""
