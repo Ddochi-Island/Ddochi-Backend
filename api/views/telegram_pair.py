@@ -34,6 +34,10 @@ CHANNEL_DEFS = {
     'activityCoord':   {'field': 'activityCoordChatId', 'label': '활동소통'},
     'sheetDashboard':  {'field': 'sheetDashboardChatId', 'label': '섭외명단', 'lastMsgIdField': 'lastSheetDashMsgId'},
     'talkDashboard':   {'field': 'talkDashboardChatId', 'label': '말걸기', 'lastMsgIdField': 'lastTalkDashMsgId'},
+    # 135/246 연합(사쉐 통합 대시보드) 전용 — team='135 연합'/'246 연합'일 때만 씀.
+    'shedUnified':     {'field': 'shedUnifiedChatId', 'label': '통합현황판', 'lastMsgIdField': 'lastShedMsgId'},
+    'tmDash':          {'field': 'tmDashChatId', 'label': 'TM현황', 'lastMsgIdField': 'lastTmMsgId'},
+    'schedDash':       {'field': 'schedDashChatId', 'label': '예약타임테이블', 'lastMsgIdField': 'lastSchedMsgId'},
 }
 
 

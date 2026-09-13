@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import require_jwt
 from api.clients.data_router import DataRouterClient
-from api.telegram.team_config import load_all_team_configs
+from api.telegram.team_config import load_all_team_configs, load_team_config
 
 
 def _json_body(request):
@@ -35,11 +35,18 @@ def get_teams(request, *args, **kwargs):
     )
     codes = [r['region_code'] for r in rows]
     all_configs = load_all_team_configs(client, codes)
+    configs = {c: all_configs.get(c, {}) for c in codes}
+    # 135/246 연합(사쉐 통합 대시보드) 설정 — list/teams엔 안 넣음(다른 화면들도
+    # 이 엔드포인트를 공유해서 팀 탭/드롭다운을 채우는데, 그쪽엔 이 가상 팀이
+    # 노출되면 안 됨). TelegramConnectModal.vue가 로컬에서 탭을 추가하고 이
+    # configs 키로 조회.
+    configs['135 연합'] = load_team_config(client, '135 연합')
+    configs['246 연합'] = load_team_config(client, '246 연합')
     return JsonResponse({
         'success': True,
         'list': codes,
         'teams': [{'id': c, 'name': c} for c in codes],
-        'configs': {c: all_configs.get(c, {}) for c in codes},
+        'configs': configs,
     })
 
 

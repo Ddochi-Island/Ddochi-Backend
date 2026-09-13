@@ -6,6 +6,7 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import send_fresh_matching_dashboard
 from api.telegram.prospect_dashboard import send_fresh_prospect_dashboard
+from api.telegram.shed_union_dashboards import send_fresh_shed_sched, send_fresh_shed_tm, send_fresh_shed_unified
 from api.telegram.team_config import list_prospect_chat_team_ids, list_stats_chat_team_ids
 from api.telegram.team_stats import send_fresh_team_stats
 
@@ -237,10 +238,13 @@ def logs(request, *args, **kwargs):
 
 @csrf_exempt
 def send_shed_unified_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-shed-unified-dashboard 포팅
+    """135 연합(선한양치기) 통합현황판 정각 크론."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    result = send_fresh_shed_unified(DataRouterClient(), '135')
+    return JsonResponse({'success': True, 'result': result})
 
 
 @csrf_exempt
@@ -253,10 +257,13 @@ def update_shed_unified_dashboard(request, *args, **kwargs):
 
 @csrf_exempt
 def send_shed_tm_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-shed-tm-dashboard 포팅
+    """135 연합(선한양치기) TM현황 정각 크론."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    result = send_fresh_shed_tm(DataRouterClient(), '135')
+    return JsonResponse({'success': True, 'result': result})
 
 
 @csrf_exempt
@@ -269,10 +276,13 @@ def update_shed_tm_dashboard(request, *args, **kwargs):
 
 @csrf_exempt
 def send_shed_sched_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-shed-sched-dashboard 포팅
+    """135 연합(선한양치기) 예약타임테이블 정각 크론."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    result = send_fresh_shed_sched(DataRouterClient(), '135')
+    return JsonResponse({'success': True, 'result': result})
 
 
 @csrf_exempt
@@ -285,10 +295,13 @@ def update_shed_sched_dashboard(request, *args, **kwargs):
 
 @csrf_exempt
 def send_shed_246_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-shed-246-dashboard 포팅
+    """246 연합(질적찾기) 통합현황판 정각 크론."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    result = send_fresh_shed_unified(DataRouterClient(), '246')
+    return JsonResponse({'success': True, 'result': result})
 
 
 @csrf_exempt
@@ -301,10 +314,13 @@ def update_shed_246_dashboard(request, *args, **kwargs):
 
 @csrf_exempt
 def send_shed_246_tm_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-shed-246-tm-dashboard 포팅
+    """246 연합(질적찾기) TM현황 정각 크론."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    result = send_fresh_shed_tm(DataRouterClient(), '246')
+    return JsonResponse({'success': True, 'result': result})
 
 
 @csrf_exempt
@@ -317,10 +333,13 @@ def update_shed_246_tm_dashboard(request, *args, **kwargs):
 
 @csrf_exempt
 def send_shed_246_sched_dashboard(request, *args, **kwargs):
-    # TODO: services/main/src/routes/cronInternal.js 의 POST /send-shed-246-sched-dashboard 포팅
+    """246 연합(질적찾기) 예약타임테이블 정각 크론."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    result = send_fresh_shed_sched(DataRouterClient(), '246')
+    return JsonResponse({'success': True, 'result': result})
 
 
 @csrf_exempt

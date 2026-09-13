@@ -14,6 +14,7 @@ from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient
 from api.telegram.habjaeyang import send_habjaeyang_to_telegram
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
+from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
 
 
 def _json_body(request):
@@ -655,6 +656,15 @@ def submit_result(request, *args, **kwargs):
     else:
         return JsonResponse({'success': False, 'message': f'아직 지원 안 되는 처리예요: {log_type}'}, status=400)
 
+    if log_type in TM_RESULT or log_type == '티엠예약':
+        group = shed_union_for_sarang(client, sarang_id)
+        if group:
+            try:
+                refresh_shed_tm(client, group)
+                refresh_shed_sched(client, group)
+            except Exception:
+                logging.getLogger('api.views.assets').warning('[submit_result] shed dashboard refresh failed', exc_info=True)
+
     return JsonResponse({'success': True})
 
 
@@ -923,6 +933,12 @@ def update_approval(request, *args, **kwargs):
             refresh_matching_dashboard_for_sarang(client, sarang_id)
         except Exception:
             logging.getLogger('api.views.assets').warning('[update_approval] matching dashboard refresh failed', exc_info=True)
+        group = shed_union_for_sarang(client, sarang_id)
+        if group:
+            try:
+                refresh_shed_unified(client, group)
+            except Exception:
+                logging.getLogger('api.views.assets').warning('[update_approval] shed unified dashboard refresh failed', exc_info=True)
 
     return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
 
@@ -1309,6 +1325,13 @@ def shed_register(request, *args, **kwargs):
         'args': [sabun, intake_id],
     })
     client.tx(stmts)
+    group = shed_union_for_sarang(client, sarang_id)
+    if group:
+        try:
+            refresh_shed_tm(client, group)
+            refresh_shed_sched(client, group)
+        except Exception:
+            logging.getLogger('api.views.assets').warning('[shed_register] shed dashboard refresh failed', exc_info=True)
     return JsonResponse({'success': True, 'sarangId': sarang_id})
 
 
