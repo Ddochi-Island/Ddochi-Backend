@@ -125,7 +125,9 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        # 배포 환경에선 컨테이너 재빌드에도 admin/auth/session 데이터가 살아남도록
+        # 볼륨 마운트 경로를 가리키게 오버라이드 — 기본값은 기존 로컬 동작 그대로.
+        'NAME': config('DJANGO_DB_PATH', default=str(BASE_DIR / 'db.sqlite3')),
     }
 }
 

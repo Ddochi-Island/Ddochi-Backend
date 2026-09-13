@@ -1,0 +1,25 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, ddochi-vm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy server secrets (.env, wallet)
+        run: |
+          cp /home/ubuntu/ddochi-secrets/.env .env
+
+      - name: Build and deploy
+        run: docker compose -f docker-compose.prod.yml up -d --build
+
+      - name: Reclaim disk (old images/build cache)
+        if: always()
+        run: |
+          docker image prune -f
+          docker builder prune -f

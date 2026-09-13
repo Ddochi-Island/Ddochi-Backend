@@ -1,0 +1,38 @@
+# 배포 서버(self-hosted runner) 전용 — 로컬 개발용 docker-compose.yml과 분리.
+# django 컨테이너가 data_router를 서비스명(DNS)으로 찾도록 같은 네트워크에서 실행.
+services:
+  data_router:
+    build:
+      context: ./data_router
+      target: runtime
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HTTP_ADDR: :8080
+      ORACLE_USER: ${DB_USER}
+      ORACLE_PASSWORD: ${DB_PASSWORD}
+      ORACLE_WALLET_DIR: ${TNS_ADMIN}
+      ORACLE_SERVICE_ALIAS: ${DB_NAME}
+      INTERNAL_API_TOKEN: ${DATA_ROUTER_TOKEN}
+      STORAGE_ENABLED: "0"
+    volumes:
+      - ${TNS_ADMIN}:${TNS_ADMIN}:ro
+
+  django:
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATA_ROUTER_URL: http://data_router:8080
+      DJANGO_DB_PATH: /data/db.sqlite3
+    volumes:
+      - django_data:/data
+    depends_on:
+      - data_router
+
+volumes:
+  django_data:
