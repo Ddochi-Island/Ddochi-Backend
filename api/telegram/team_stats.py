@@ -11,7 +11,8 @@ import datetime
 import logging
 
 from api.telegram import tel_router_client
-from api.telegram.team_config import load_team_config, patch_team_config
+from api.telegram.dashboard_send import send_fresh_dashboard
+from api.telegram.team_config import load_team_config
 from api.telegram.team_goals import load_team_goal_total
 
 logger = logging.getLogger('api.telegram.team_stats')
@@ -294,7 +295,9 @@ def refresh_team_stats(client, region_code, date_str=None):
 
 
 def send_fresh_team_stats(client, region_code):
-    """정각 크론 전용 — 매번 새 메시지로 발송하고 성공하면 직전 메시지를 삭제."""
+    """정각 크론 전용 — 매번 새 메시지로 발송. 같은 날 안에서는 직전 메시지를
+    삭제하지만, 날짜가 바뀐 뒤 첫 발송이면 전날 마지막 메시지는 하루치 기록으로
+    남겨두고 지우지 않음(dashboard_send.send_fresh_dashboard)."""
     date_str = datetime.date.today().isoformat()
     cfg = load_team_config(client, region_code)
     chat_id = cfg.get('statsChatId')
@@ -302,31 +305,7 @@ def send_fresh_team_stats(client, region_code):
         return {'skipped': True, 'reason': 'no_chat_id'}
 
     text = _build_message(client, region_code, date_str)
-    try:
-        result = tel_router_client.enqueue(
-            'sendMessage',
-            {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': _dashboard_reply_markup()},
-            await_result=True,
-        )
-    except Exception:
-        logger.warning('[team_stats] send_fresh sendMessage failed', exc_info=True)
-        return {'sent': False}
-
-    if not result.get('ok'):
-        logger.warning('[team_stats] send_fresh sendMessage rejected: %s', result.get('description'))
-        return {'sent': False}
-
-    new_msg_id = result.get('result', {}).get('message_id')
-    if not new_msg_id:
-        return {'sent': True, 'deletedPrevious': False}
-
-    previous_msg_id = cfg.get('lastStatsMsgId')
-    patch_team_config(client, region_code, {'lastStatsMsgId': new_msg_id}, 'system')
-
-    if previous_msg_id and str(previous_msg_id) != str(new_msg_id):
-        try:
-            tel_router_client.enqueue('deleteMessage', {'chat_id': chat_id, 'message_id': previous_msg_id})
-        except Exception:
-            logger.warning('[team_stats] delete previous message failed', exc_info=True)
-
-    return {'sent': True, 'newMessageId': new_msg_id, 'deletedPrevious': bool(previous_msg_id)}
+    return send_fresh_dashboard(
+        client, region_code, chat_id, text, _dashboard_reply_markup(), cfg,
+        'lastStatsMsgId', 'lastStatsMsgDate', 'team_stats',
+    )

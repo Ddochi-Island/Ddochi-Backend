@@ -8,6 +8,7 @@ import datetime
 import logging
 
 from api.telegram import tel_router_client
+from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.team_config import load_team_config, patch_team_config
 
 logger = logging.getLogger('api.telegram.prospect_dashboard')
@@ -190,7 +191,9 @@ def refresh_prospect_dashboard(client, team_id, allow_create=True):
 
 
 def send_fresh_prospect_dashboard(client, team_id):
-    """정각 크론 전용 — 매번 새 메시지로 발송하고, 성공하면 직전 메시지를 삭제.
+    """정각 크론 전용 — 매번 새 메시지로 발송. 같은 날 안에서는 직전 메시지를
+    삭제하지만, 날짜가 바뀐 뒤 첫 발송이면 전날 마지막 메시지는 하루치 기록으로
+    남겨두고 지우지 않음(dashboard_send.send_fresh_dashboard).
     (이벤트 훅용 refresh_prospect_dashboard는 같은 메시지를 계속 edit — 이건 매시 갱신용)"""
     cfg = load_team_config(client, team_id)
     chat_id = cfg.get('prospectChatId') or cfg.get('matchingChatId')
@@ -202,31 +205,7 @@ def send_fresh_prospect_dashboard(client, team_id):
         rows = _fetch_rows(client, team_id)
     text = _build_text(team_id, rows, chat_id)
 
-    try:
-        result = tel_router_client.enqueue(
-            'sendMessage',
-            {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': _dashboard_reply_markup()},
-            await_result=True,
-        )
-    except Exception:
-        logger.warning('[prospect_dashboard] send_fresh sendMessage failed', exc_info=True)
-        return {'sent': False}
-
-    if not result.get('ok'):
-        logger.warning('[prospect_dashboard] send_fresh sendMessage rejected: %s', result.get('description'))
-        return {'sent': False}
-
-    new_msg_id = result.get('result', {}).get('message_id')
-    if not new_msg_id:
-        return {'sent': True, 'deletedPrevious': False}
-
-    previous_msg_id = cfg.get('lastProspectMsgId')
-    patch_team_config(client, team_id, {'lastProspectMsgId': new_msg_id}, 'system')
-
-    if previous_msg_id and str(previous_msg_id) != str(new_msg_id):
-        try:
-            tel_router_client.enqueue('deleteMessage', {'chat_id': chat_id, 'message_id': previous_msg_id})
-        except Exception:
-            logger.warning('[prospect_dashboard] delete previous message failed', exc_info=True)
-
-    return {'sent': True, 'newMessageId': new_msg_id, 'deletedPrevious': bool(previous_msg_id)}
+    return send_fresh_dashboard(
+        client, team_id, chat_id, text, _dashboard_reply_markup(), cfg,
+        'lastProspectMsgId', 'lastProspectMsgDate', 'prospect_dashboard',
+    )
