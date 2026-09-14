@@ -299,7 +299,8 @@ _DIVIDER = '---------------------------'
 
 def _build_tm_text(group, label, regs, logs, approvals):
     now = datetime.datetime.now()
-    success_count = sum(1 for l in logs if l['result'] == 'MEET_FIX')
+    # 성사 = 만남픽스만이 아니라 전화가 연결돼서 뭐든 진행된 시도(부재중만 제외).
+    success_count = sum(1 for l in logs if l['result'] != 'NO_ANSWER')
 
     by_region = {}
     for r in regs:
@@ -330,7 +331,7 @@ def _build_tm_text(group, label, regs, logs, approvals):
         for l in logs:
             slot = by_caller.setdefault(l['caller_name'] or '-', {'total': 0, 'success': 0})
             slot['total'] += 1
-            if l['result'] == 'MEET_FIX':
+            if l['result'] != 'NO_ANSWER':
                 slot['success'] += 1
         ranked = sorted(by_caller.items(), key=lambda x: -x[1]['total'])
         for i, (name, s) in enumerate(ranked):
