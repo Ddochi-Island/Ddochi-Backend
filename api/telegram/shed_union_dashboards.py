@@ -274,22 +274,27 @@ def _fetch_tm_logs(client, regions, date_str):
 
 
 def _fetch_tm_approvals(client, regions, date_str):
+    """사람(SARANG_ID) 당 하루 한 번만 셈 — 같은 건을 여러 번 재가 눌러도(재승인 등)
+    SARANG_ACTIVITY_LOGS엔 매번 로그가 남아서 중복 집계되는 걸 방지."""
     if not regions:
         return []
     placeholders, values = _in_clause(regions, start=2)
     return client.query(
-        f"""SELECT spi.NAME AS PI_NAME, im.NAME AS INTRODUCER_NAME, cm.NAME AS CALLER_NAME
-              FROM SARANG_ACTIVITY_LOGS al
-              JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
-              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
-              JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
-              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-              LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
-              LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
-              LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = hj.CALLER_MEMBER_ID
-             WHERE al.EVENT_TYPE = '재가처리'
-               AND TRUNC(al.CREATED_AT) = TO_DATE(:1, 'YYYY-MM-DD')
-               AND mah.REGION_CODE IN ({placeholders})""",
+        f"""SELECT PI_NAME, INTRODUCER_NAME, CALLER_NAME FROM (
+              SELECT spi.NAME AS PI_NAME, im.NAME AS INTRODUCER_NAME, cm.NAME AS CALLER_NAME,
+                     ROW_NUMBER() OVER (PARTITION BY s.SARANG_ID ORDER BY al.CREATED_AT DESC) AS RN
+                FROM SARANG_ACTIVITY_LOGS al
+                JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
+                JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+                JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+                JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+                LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
+                LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+                LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = hj.CALLER_MEMBER_ID
+               WHERE al.EVENT_TYPE = '재가처리'
+                 AND TRUNC(al.CREATED_AT) = TO_DATE(:1, 'YYYY-MM-DD')
+                 AND mah.REGION_CODE IN ({placeholders})
+            ) WHERE RN = 1""",
         [date_str] + values,
     )
 
