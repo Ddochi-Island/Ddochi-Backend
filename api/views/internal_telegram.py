@@ -11,7 +11,7 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.habjaeyang import refresh_hj_markup
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
-from api.telegram.shed_union_dashboards import refresh_shed_unified, shed_union_for_sarang
+from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
 from api.views.assets import _set_habjaeyang_approval, _toggle_hj_field
 
 HJ_SHORT = {'r': 'reply', 'w': 'window', 'a': 'approve', 'n': 'noop'}
@@ -83,9 +83,10 @@ def _handle_hj(client, args, chat_id, message_id, telegram_id):
         if group:
             try:
                 refresh_shed_unified(client, group)
+                refresh_shed_tm(client, group)
             except Exception:
                 logging.getLogger('api.views.internal_telegram').warning(
-                    '[handle_hj:approve] shed unified dashboard refresh failed', exc_info=True,
+                    '[handle_hj:approve] shed dashboard refresh failed', exc_info=True,
                 )
         return {'toast': '🎉 재가 완료!'}
 

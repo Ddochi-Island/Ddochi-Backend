@@ -937,8 +937,9 @@ def update_approval(request, *args, **kwargs):
         if group:
             try:
                 refresh_shed_unified(client, group)
+                refresh_shed_tm(client, group)
             except Exception:
-                logging.getLogger('api.views.assets').warning('[update_approval] shed unified dashboard refresh failed', exc_info=True)
+                logging.getLogger('api.views.assets').warning('[update_approval] shed dashboard refresh failed', exc_info=True)
 
     return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
 
