@@ -11,7 +11,7 @@ import logging
 
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
-from api.telegram.team_config import load_team_config
+from api.telegram.team_config import load_all_team_configs, load_team_config
 
 logger = logging.getLogger('api.telegram.shed_union_dashboards')
 
@@ -131,15 +131,22 @@ def _display_date(r, today):
     return datetime.date.fromisoformat(r['mt_date']) if r['mt_date'] else today
 
 
-def _build_unified_text(group, title, rows, chat_id=None):
+def _region_tg_chat_part(chat_id):
+    """t.me/c/{id}/{msgId} 딥링크는 슈퍼그룹(id가 -100으로 시작)에서만 유효함 —
+    prospect_dashboard.py의 같은 처리."""
+    chat_id_str = str(chat_id) if chat_id else ''
+    return chat_id_str.removeprefix('-100') if chat_id_str.startswith('-100') else None
+
+
+def _build_unified_text(group, title, rows, region_chat_map=None):
+    """region_chat_map: {region_code: chat_id} — 개별 합재양 카드(TELEGRAM_MSG_ID)는
+    통합현황판 자체의 채팅방이 아니라 그 사람 소속 지역의 찾기현황판 채팅방에
+    올라가 있어서, 딥링크는 반드시 그 지역 chat_id로 만들어야 함(통합현황판이 다른
+    채팅방에 연결돼 있으면 메시지 ID가 그 방 기준으로는 의미가 없음)."""
     now = datetime.datetime.now()
     today = now.date()
     two_days_ago = today - datetime.timedelta(days=2)
-
-    # t.me/c/{id}/{msgId} 딥링크는 슈퍼그룹(id가 -100으로 시작)에서만 유효함 —
-    # prospect_dashboard.py의 같은 처리 재사용.
-    chat_id_str = str(chat_id) if chat_id else ''
-    tg_chat_part = chat_id_str.removeprefix('-100') if chat_id_str.startswith('-100') else None
+    region_chat_map = region_chat_map or {}
 
     groups = {}
     for r in rows:
@@ -168,6 +175,7 @@ def _build_unified_text(group, title, rows, chat_id=None):
             tool = it['tool'] or ''
             path_label = route + (f'({tool})' if tool and tool not in route else '')
             path_text = f"{_fmt_md(it['mt_date'])}{it['mt_time'] or ''}_{path_label}"
+            tg_chat_part = _region_tg_chat_part(region_chat_map.get(it['region_code']))
             if tg_chat_part and it['telegram_msg_id']:
                 path_text = f'<a href="https://t.me/c/{tg_chat_part}/{it["telegram_msg_id"]}">{path_text}</a>'
             lines.append(f"<code>{icon}{name_str} {replied}{window}</code>")
@@ -178,11 +186,13 @@ def _build_unified_text(group, title, rows, chat_id=None):
     return text[:4000] + ('\n…' if len(text) > 4000 else '')
 
 
-def _build_message_unified(client, group, chat_id=None):
+def _build_message_unified(client, group):
     regions = _union_regions(client, group)
     rows = _fetch_unified_rows(client, regions)
+    region_configs = load_all_team_configs(client, regions)
+    region_chat_map = {r: (cfg.get('prospectChatId') or cfg.get('matchingChatId')) for r, cfg in region_configs.items()}
     title = f"{'선한양치기' if group == '135' else '질적찾기'} 통합 찾기 현황판"
-    return _build_unified_text(group, title, rows, chat_id)
+    return _build_unified_text(group, title, rows, region_chat_map)
 
 
 def refresh_shed_unified(client, group):
@@ -196,7 +206,7 @@ def refresh_shed_unified(client, group):
     previous_msg_id = cfg.get('lastShedMsgId')
     if not previous_msg_id:
         return {'skipped': True, 'reason': 'no_existing_message'}
-    text = _build_message_unified(client, group, chat_id)
+    text = _build_message_unified(client, group)
     try:
         result = tel_router_client.enqueue(
             'editMessageText',
@@ -218,7 +228,7 @@ def send_fresh_shed_unified(client, group):
     chat_id = cfg.get('shedUnifiedChatId')
     if not chat_id:
         return {'skipped': True, 'reason': 'no_chat_id'}
-    text = _build_message_unified(client, group, chat_id)
+    text = _build_message_unified(client, group)
     return send_fresh_dashboard(
         client, team_id, chat_id, text, _dashboard_reply_markup('matching'), cfg,
         'lastShedMsgId', 'lastShedMsgDate', 'shed_union_unified',
