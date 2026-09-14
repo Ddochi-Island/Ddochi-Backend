@@ -14,7 +14,9 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard
 from api.telegram.prospect_dashboard import refresh_prospect_dashboard
+from api.telegram.shed_union_dashboards import send_fresh_shed_sched, send_fresh_shed_tm, send_fresh_shed_unified
 from api.telegram.team_config import patch_team_config
+from api.telegram.team_stats import send_fresh_team_stats
 from api.views.telegram_pair import CHANNEL_DEFS
 
 
@@ -118,6 +120,22 @@ def telegram_pair_complete(request, *args, **kwargs):
         except Exception:
             logging.getLogger('api.views.telegram_pair_internal').warning(
                 '[telegram_pair_complete] matching dashboard initial send failed', exc_info=True,
+            )
+    elif channel_type == 'stats':
+        try:
+            send_fresh_team_stats(client, team_id)
+        except Exception:
+            logging.getLogger('api.views.telegram_pair_internal').warning(
+                '[telegram_pair_complete] stats dashboard initial send failed', exc_info=True,
+            )
+    elif channel_type in ('shedUnified', 'tmDash', 'schedDash'):
+        group = '135' if team_id == '135 연합' else '246'
+        fn = {'shedUnified': send_fresh_shed_unified, 'tmDash': send_fresh_shed_tm, 'schedDash': send_fresh_shed_sched}[channel_type]
+        try:
+            fn(client, group)
+        except Exception:
+            logging.getLogger('api.views.telegram_pair_internal').warning(
+                '[telegram_pair_complete] shed union dashboard initial send failed', exc_info=True,
             )
 
     # TEAMS.DISPLAY_NAME이 없는 프로젝트라 팀 이름 자리엔 TEAM_ID(REGION_CODE) 그대로.
