@@ -16,9 +16,6 @@ from api.telegram.team_config import load_all_team_configs, load_team_config
 logger = logging.getLogger('api.telegram.shed_union_dashboards')
 
 _WEEK = ['일', '월', '화', '수', '목', '금', '토']
-# TM_RESULT_CODES.RESULT_CODE 기준(한글 자유텍스트 아님 — sql/10_tm_result_codes.sql).
-_RESULT_ICON = {'NO_ANSWER': '📵', 'RESERVED_TM': '📅', 'MEET_FIX': '✅', 'UNFIT': '❌', 'REJECT': '🚫', 'INVALID': '⚪️'}
-_RESULT_LABEL = {'NO_ANSWER': '부재중', 'RESERVED_TM': '예약 티엠', 'MEET_FIX': '만남 픽스', 'UNFIT': '비합', 'REJECT': '거절', 'INVALID': '무효'}
 
 
 def _fmt_md(date_str):
@@ -302,6 +299,10 @@ def _fetch_tm_approvals(client, regions, date_str):
 _DIVIDER = '---------------------------'
 
 
+_RESULT_LABEL_SHORT = {'NO_ANSWER': '안받음', 'RESERVED_TM': '예약', 'MEET_FIX': '만남픽스', 'UNFIT': '비합', 'REJECT': '거절', 'INVALID': '무효'}
+_RESULT_ORDER = ('NO_ANSWER', 'RESERVED_TM', 'MEET_FIX', 'UNFIT', 'REJECT', 'INVALID')
+
+
 def _build_tm_text(group, label, regs, logs, approvals):
     now = datetime.datetime.now()
     # 성사 = 만남픽스만이 아니라 전화가 연결돼서 뭐든 진행된 시도(부재중만 제외).
@@ -310,20 +311,31 @@ def _build_tm_text(group, label, regs, logs, approvals):
     by_region = {}
     for r in regs:
         by_region.setdefault(r['region_code'], []).append(r)
+    intro_counts = {}
+    for r in regs:
+        key = r['introducer_name'] or '-'
+        intro_counts[key] = intro_counts.get(key, 0) + 1
+    top_introducer = sorted(intro_counts.items(), key=lambda x: -x[1])[0][0] if intro_counts else None
 
     lines = [
         f'🐾📞 {label} 오늘의 현황',
         f"- {_fmt_md(now.date().isoformat())} {now.strftime('%H:%M')} 기준",
         '',
-        f"📋 번호찾 {len(regs)}명 · 📞 시도 {len(logs)}건 · ✅ 성사 {success_count}건 · 🤝 합자찾 {len(approvals)}명",
+        f"📋 번호찾 <b>{len(regs)}</b>명 · 📞 시도 <b>{len(logs)}</b>건 · ✅ 성사 <b>{success_count}</b>건 · 🤝 합자찾 <b>{len(approvals)}</b>명",
         '',
         _DIVIDER,
         f'📋 번호찾 총 {len(regs)}명',
     ]
     if by_region:
-        for rc in sorted(by_region.keys()):
-            names = ', '.join(f"{r['introducer_name'] or '-'}→{r['pi_name']}" for r in by_region[rc])
-            lines.append(f'◾️{rc}지역 ({len(by_region[rc])}명): {names}')
+        lines.append('')
+        region_keys = sorted(by_region.keys())
+        for rc in region_keys:
+            lines.append(f'◾️<b>{rc}지역 ({len(by_region[rc])}명)</b>')
+            for r in by_region[rc]:
+                intro = r['introducer_name'] or '-'
+                row = f"{intro} | {r['pi_name']}"
+                lines.append(f'👑 <b>{row}</b>' if intro == top_introducer else row)
+            lines.append('')
     else:
         lines.append('없음')
 
@@ -340,16 +352,27 @@ def _build_tm_text(group, label, regs, logs, approvals):
                 slot['success'] += 1
         ranked = sorted(by_caller.items(), key=lambda x: -x[1]['total'])
         for i, (name, s) in enumerate(ranked):
-            crown = '👑' if i == 0 else '▫️'
-            lines.append(f"{crown} {name}  {s['total']}건 / {s['success']}건 성사")
-        for target in ('UNFIT', 'REJECT'):
-            reasons = [l['sub_reason_label'] for l in logs if l['result'] == target and l['sub_reason_label']]
-            if reasons:
-                by_reason = {}
-                for rs in reasons:
-                    by_reason.setdefault(rs, 0)
-                    by_reason[rs] += 1
-                lines.append(f"{_RESULT_LABEL[target]} 사유: " + ', '.join(f'{rs}({c})' for rs, c in by_reason.items()))
+            row = f"{name}  {s['total']}건 / {s['success']}건 성사"
+            lines.append(f'👑 <b>{row}</b>' if i == 0 else row)
+        lines.append('')
+        by_result = {}
+        for l in logs:
+            by_result.setdefault(l['result'], 0)
+            by_result[l['result']] += 1
+        for code in _RESULT_ORDER:
+            cnt = by_result.get(code)
+            if not cnt:
+                continue
+            row = f'{_RESULT_LABEL_SHORT[code]} {cnt}'
+            if code in ('UNFIT', 'REJECT'):
+                reasons = [l['sub_reason_label'] for l in logs if l['result'] == code and l['sub_reason_label']]
+                if reasons:
+                    by_reason = {}
+                    for rs in reasons:
+                        by_reason.setdefault(rs, 0)
+                        by_reason[rs] += 1
+                    row += ' | ' + '  '.join(f'{rs} {c}' for rs, c in by_reason.items())
+            lines.append(row)
     else:
         lines.append('없음')
 
