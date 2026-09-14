@@ -693,6 +693,13 @@ def delete_log(request, *args, **kwargs):
         if row['result'] == 'MEET_FIX':
             stmts.append({'sql': "UPDATE SARANG SET STAGE = '티엠' WHERE SARANG_ID = :1", 'args': [sarang_id]})
         client.tx(stmts)
+        group = shed_union_for_sarang(client, sarang_id)
+        if group:
+            try:
+                refresh_shed_tm(client, group)
+                refresh_shed_sched(client, group)
+            except Exception:
+                logging.getLogger('api.views.assets').warning('[delete_log] shed dashboard refresh failed', exc_info=True)
     elif source == 'match':
         # 매칭결과 로그는 SARANG_MATCH_HISTORIES 행 자체(만남 일정) 삭제가 아니라
         # 입력된 결과만 되돌림 — 그 행은 날짜/장소/교사 정보도 같이 들고 있음.
@@ -708,6 +715,13 @@ def delete_log(request, *args, **kwargs):
         )
         if not affected:
             return JsonResponse({'success': False, 'message': '로그를 찾을 수 없어요'}, status=404)
+        group = shed_union_for_sarang(client, sarang_id)
+        if group:
+            try:
+                refresh_shed_unified(client, group)
+                refresh_shed_tm(client, group)
+            except Exception:
+                logging.getLogger('api.views.assets').warning('[delete_log] shed dashboard refresh failed', exc_info=True)
 
     return JsonResponse({'success': True})
 
