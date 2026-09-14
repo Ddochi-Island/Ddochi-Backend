@@ -131,10 +131,15 @@ def _display_date(r, today):
     return datetime.date.fromisoformat(r['mt_date']) if r['mt_date'] else today
 
 
-def _build_unified_text(group, title, rows):
+def _build_unified_text(group, title, rows, chat_id=None):
     now = datetime.datetime.now()
     today = now.date()
     two_days_ago = today - datetime.timedelta(days=2)
+
+    # t.me/c/{id}/{msgId} 딥링크는 슈퍼그룹(id가 -100으로 시작)에서만 유효함 —
+    # prospect_dashboard.py의 같은 처리 재사용.
+    chat_id_str = str(chat_id) if chat_id else ''
+    tg_chat_part = chat_id_str.removeprefix('-100') if chat_id_str.startswith('-100') else None
 
     groups = {}
     for r in rows:
@@ -163,6 +168,8 @@ def _build_unified_text(group, title, rows):
             tool = it['tool'] or ''
             path_label = route + (f'({tool})' if tool and tool not in route else '')
             path_text = f"{_fmt_md(it['mt_date'])}{it['mt_time'] or ''}_{path_label}"
+            if tg_chat_part and it['telegram_msg_id']:
+                path_text = f'<a href="https://t.me/c/{tg_chat_part}/{it["telegram_msg_id"]}">{path_text}</a>'
             lines.append(f"<code>{icon}{name_str} {replied}{window}</code>")
             lines.append(f'   ⤷ {path_text}')
         lines.append('')
@@ -171,11 +178,11 @@ def _build_unified_text(group, title, rows):
     return text[:4000] + ('\n…' if len(text) > 4000 else '')
 
 
-def _build_message_unified(client, group):
+def _build_message_unified(client, group, chat_id=None):
     regions = _union_regions(client, group)
     rows = _fetch_unified_rows(client, regions)
     title = f"{'선한양치기' if group == '135' else '질적찾기'} 통합 찾기 현황판"
-    return _build_unified_text(group, title, rows)
+    return _build_unified_text(group, title, rows, chat_id)
 
 
 def refresh_shed_unified(client, group):
@@ -189,7 +196,7 @@ def refresh_shed_unified(client, group):
     previous_msg_id = cfg.get('lastShedMsgId')
     if not previous_msg_id:
         return {'skipped': True, 'reason': 'no_existing_message'}
-    text = _build_message_unified(client, group)
+    text = _build_message_unified(client, group, chat_id)
     try:
         result = tel_router_client.enqueue(
             'editMessageText',
@@ -211,7 +218,7 @@ def send_fresh_shed_unified(client, group):
     chat_id = cfg.get('shedUnifiedChatId')
     if not chat_id:
         return {'skipped': True, 'reason': 'no_chat_id'}
-    text = _build_message_unified(client, group)
+    text = _build_message_unified(client, group, chat_id)
     return send_fresh_dashboard(
         client, team_id, chat_id, text, _dashboard_reply_markup('matching'), cfg,
         'lastShedMsgId', 'lastShedMsgDate', 'shed_union_unified',
