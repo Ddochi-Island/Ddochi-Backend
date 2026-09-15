@@ -83,16 +83,20 @@ def _fetch_daily_reports(client, region_code, date_str):
 
 
 def _fetch_approvals(client, region_code, date_str):
-    """오늘 재가 처리된 건 — SARANG.RECRUITMENT_TYPE으로 온/오프 구분."""
+    """오늘 재가 처리된 건 — SARANG.RECRUITMENT_TYPE으로 온/오프 구분. 사람(SARANG_ID)당
+    하루 한 번만 셈(재승인 등으로 로그가 여러 번 남아도 중복 집계 안 되게)."""
     return client.query(
-        """SELECT s.RECRUITMENT_TYPE, mah.DISTRICT_CODE
-             FROM SARANG_ACTIVITY_LOGS al
-             JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
-             JOIN MEMBER_AFFILIATION_HISTORIES mah
-               ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-            WHERE al.EVENT_TYPE = '재가처리'
-              AND mah.REGION_CODE = :1
-              AND TRUNC(al.CREATED_AT) = TO_DATE(:2, 'YYYY-MM-DD')""",
+        """SELECT RECRUITMENT_TYPE, DISTRICT_CODE FROM (
+             SELECT s.RECRUITMENT_TYPE, mah.DISTRICT_CODE,
+                    ROW_NUMBER() OVER (PARTITION BY s.SARANG_ID ORDER BY al.CREATED_AT DESC) AS RN
+               FROM SARANG_ACTIVITY_LOGS al
+               JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
+               JOIN MEMBER_AFFILIATION_HISTORIES mah
+                 ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+              WHERE al.EVENT_TYPE = '재가처리'
+                AND mah.REGION_CODE = :1
+                AND TRUNC(al.CREATED_AT) = TO_DATE(:2, 'YYYY-MM-DD')
+           ) WHERE RN = 1""",
         [region_code, date_str],
     )
 
@@ -271,6 +275,22 @@ def _build_message(client, region_code, date_str):
     offline_search = _fetch_offline_search(client, region_code, date_str)
     goals = load_team_goal_total(client, region_code)
     return _build_text(region_code, date_str, reports, approvals, offline_search, districts, leaders, goals)
+
+
+def refresh_team_stats_for_sarang(client, sarang_id, date_str=None):
+    """호출부가 region_code를 모를 때 쓰는 편의 함수 — 재가/사쉐등록 같은 sarang_id
+    단위 이벤트 훅에서 바로 부를 수 있게 INFLOW_MEMBER_ID로 지역을 resolve."""
+    row = client.query_one(
+        """SELECT mah.REGION_CODE
+             FROM SARANG s
+             JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+            WHERE s.SARANG_ID = :1""",
+        [sarang_id],
+    )
+    if not row or not row['region_code']:
+        return {'skipped': True, 'reason': 'region_missing'}
+    return refresh_team_stats(client, row['region_code'], date_str)
 
 
 def refresh_team_stats(client, region_code, date_str=None):

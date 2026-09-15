@@ -15,6 +15,7 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.habjaeyang import send_habjaeyang_to_telegram
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
+from api.telegram.team_stats import refresh_team_stats_for_sarang
 
 
 def _json_body(request):
@@ -947,6 +948,10 @@ def update_approval(request, *args, **kwargs):
             refresh_matching_dashboard_for_sarang(client, sarang_id)
         except Exception:
             logging.getLogger('api.views.assets').warning('[update_approval] matching dashboard refresh failed', exc_info=True)
+        try:
+            refresh_team_stats_for_sarang(client, sarang_id)
+        except Exception:
+            logging.getLogger('api.views.assets').warning('[update_approval] team stats refresh failed', exc_info=True)
         group = shed_union_for_sarang(client, sarang_id)
         if group:
             try:
@@ -1347,6 +1352,10 @@ def shed_register(request, *args, **kwargs):
             refresh_shed_sched(client, group)
         except Exception:
             logging.getLogger('api.views.assets').warning('[shed_register] shed dashboard refresh failed', exc_info=True)
+    try:
+        refresh_team_stats_for_sarang(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[shed_register] team stats refresh failed', exc_info=True)
     return JsonResponse({'success': True, 'sarangId': sarang_id})
 
 
