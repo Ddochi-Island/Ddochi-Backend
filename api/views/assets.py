@@ -1534,6 +1534,11 @@ def run_shed_gacha(request, *args, **kwargs):
     if not affected:
         return JsonResponse({'success': False, 'message': '합재양을 먼저 저장해줘'}, status=400)
 
+    try:
+        send_habjaeyang_to_telegram(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[run_shed_gacha] telegram refresh failed', exc_info=True)
+
     return JsonResponse({
         'success': True, 'winner': 'tm', 'winnerName': tm_name,
         'inflowName': inflow_name, 'tmName': tm_name,
