@@ -883,11 +883,13 @@ def _set_habjaeyang_approval(client, sarang_id, sabun, enum_val, reason=None):
     """합재양 재가/반려 처리 본체 — update_approval(앱 UI)과 텔레그램 인라인 버튼(🛡️ 재가)이 공유.
     반환: hj row가 없으면 None, 처리했으면 {'habJaeYangId': ...}."""
     hj = client.query_one(
-        "SELECT HAB_JAE_YANG_ID FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
+        "SELECT HAB_JAE_YANG_ID, HAS_REPLIED, IS_WINDOW_OPENED FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1",
         [sarang_id],
     )
     if not hj:
         return None
+    if enum_val == 'approved' and (hj['has_replied'] != '1' or hj['is_window_opened'] != '1'):
+        return {'blocked': 'reply_or_window_missing'}
 
     event_type = '재가처리' if enum_val == 'approved' else '반려처리'
     stmts = [
@@ -935,8 +937,11 @@ def update_approval(request, *args, **kwargs):
 
     sabun = request.user['sabun']
     client = DataRouterClient()
-    if _set_habjaeyang_approval(client, sarang_id, sabun, enum_val, reason) is None:
+    result = _set_habjaeyang_approval(client, sarang_id, sabun, enum_val, reason)
+    if result is None:
         return JsonResponse({'success': False, 'message': '활성 합재양이 없어요'}, status=404)
+    if result.get('blocked'):
+        return JsonResponse({'success': False, 'message': '답장과 창개설을 먼저 완료해야 재가할 수 있어요'}, status=400)
 
     try:
         send_habjaeyang_to_telegram(client, sarang_id)

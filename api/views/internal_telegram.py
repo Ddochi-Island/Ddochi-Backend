@@ -71,8 +71,11 @@ def _handle_hj(client, args, chat_id, message_id, telegram_id):
         actor = _resolve_actor(client, telegram_id, sarang_id)
         if not actor:
             return {'toast': '⚠️ 처리 실패'}
-        if _set_habjaeyang_approval(client, sarang_id, actor, 'approved') is None:
+        result = _set_habjaeyang_approval(client, sarang_id, actor, 'approved')
+        if result is None:
             return {'toast': '⚠️ 합재양 없음'}
+        if result.get('blocked'):
+            return {'toast': '⚠️ 답장/창개설 먼저 해줘'}
         refresh_hj_markup(client, sarang_id, chat_id, message_id)
         try:
             refresh_matching_dashboard_for_sarang(client, sarang_id)
