@@ -26,7 +26,7 @@ def _json_body(request):
 @require_jwt
 def daily_report_list_names(request, *args, **kwargs):
     """보고 대상자 autocomplete 명단 — 작성자와 같은 지역 소속 전원 + 이미 그
-    dateKey에 보고서를 낸 다른 지역 사람(팀장 대리 제출 등 케이스 커버)."""
+    dateKey에 보고서를 낸 다른 지역 사람(지역장 대리 제출 등 케이스 커버)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
