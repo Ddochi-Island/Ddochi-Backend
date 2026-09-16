@@ -28,11 +28,43 @@ services:
       - .env
     environment:
       DATA_ROUTER_URL: http://data_router:8080
+      TEL_ROUTER_URL: http://tel_router:8090
       DJANGO_DB_PATH: /data/db.sqlite3
     volumes:
       - django_data:/data
     depends_on:
       - data_router
+
+  cron_router:
+    build:
+      context: ./cron_router_py
+    restart: unless-stopped
+    environment:
+      DATA_ROUTER_URL: http://data_router:8080
+      DATA_ROUTER_TOKEN: ${DATA_ROUTER_TOKEN}
+      DATA_ROUTER_CALLER: cron_router
+      MAIN_URL: http://django:8000
+      MAIN_INTERNAL_TELEGRAM_TOKEN: ${TELEGRAM_INTERNAL_TOKEN}
+      SELF_TICK: "1"
+    depends_on:
+      - data_router
+      - django
+
+  tel_router:
+    build:
+      context: ./tel_router_py
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TG_WEBHOOK_SECRET: ${TG_WEBHOOK_SECRET}
+      ENQUEUE_SECRET: ${TEL_ROUTER_ENQUEUE_SECRET}
+      MAIN_SERVER_URL: http://django:8000
+      MAIN_INTERNAL_TELEGRAM_TOKEN: ${TELEGRAM_INTERNAL_TOKEN}
+      TG_CALLBACK_HMAC_SECRET: ${TG_CALLBACK_HMAC_SECRET}
+    depends_on:
+      - django
 
 volumes:
   django_data:
