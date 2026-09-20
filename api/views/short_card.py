@@ -20,12 +20,36 @@ _TIER_REGION = {'team_lead', 'team_evangelist', 'region_lead',
 _TIER_DISTRICT_ALL = {'area_lead'}
 _TIER_DISTRICT_GENERAL = {'sub_area_lead', 'team_clerk', 'team_mission_clerk', 'area_secretary'}
 
+# 짧카 재가 — 전도팀장/지역장만 (밭 관리하기 조회 RBAC의 "지역 전체" 티어보다 좁음).
+_APPROVAL_TIER = {'team_evangelist', 'team_lead'}
+_APPROVAL_STATUS_KO = {'pending': '대기중', 'approved': '재가완료', 'rejected': '반려됨'}
+
 
 def _json_body(request):
     try:
         return json.loads(request.body or b'{}')
     except (TypeError, ValueError):
         return {}
+
+
+def _caller_ctx(client, sabun):
+    """대표 POSITION_CODE + 소속 지역/구역 — admin_users.py의 SCOPE 우선순위 조회 패턴 재사용."""
+    row = client.query_one(
+        """SELECT mah.REGION_CODE, mah.DISTRICT_CODE, mpm.POSITION_CODE
+             FROM MEMBERS m
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+             LEFT JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = m.MEMBER_ID
+             LEFT JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+            WHERE m.MEMBER_ID = :1
+            ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
+            FETCH FIRST 1 ROWS ONLY""",
+        [sabun],
+    )
+    return {
+        'position_code': row['position_code'] if row else None,
+        'region_code': row['region_code'] if row else None,
+        'district_code': row['district_code'] if row else None,
+    }
 
 
 @csrf_exempt
@@ -107,20 +131,10 @@ def list_short_cards(request, *args, **kwargs):
     sabun = request.user['sabun']
     client = DataRouterClient()
 
-    ctx = client.query_one(
-        """SELECT mah.REGION_CODE, mah.DISTRICT_CODE, mpm.POSITION_CODE
-             FROM MEMBERS m
-             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
-             LEFT JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = m.MEMBER_ID
-             LEFT JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
-            WHERE m.MEMBER_ID = :1
-            ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
-            FETCH FIRST 1 ROWS ONLY""",
-        [sabun],
-    )
-    position_code = ctx['position_code'] if ctx else None
-    region_code = ctx['region_code'] if ctx else None
-    district_code = ctx['district_code'] if ctx else None
+    ctx = _caller_ctx(client, sabun)
+    position_code = ctx['position_code']
+    region_code = ctx['region_code']
+    district_code = ctx['district_code']
 
     if position_code in _TIER_GLOBAL:
         scope_sql, scope_args = '1=1', []
@@ -144,11 +158,56 @@ def list_short_cards(request, *args, **kwargs):
     rows = client.query(
         f"""SELECT sc.SHORT_CARD_ID, sc.NAME, sc.AGE, sc.GENDER, sc.SCHOOL_MAJOR,
                    sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE, sc.CREATED_AT,
-                   m.NAME AS AUTHOR_NAME
+                   sc.APPROVAL_STATUS, m.NAME AS AUTHOR_NAME
               FROM SHORT_CARDS sc
               JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
              WHERE sc.DELETED_AT IS NULL AND {scope_sql}
              ORDER BY sc.CREATED_AT DESC""",
         scope_args,
     )
-    return JsonResponse({'success': True, 'list': rows})
+    for r in rows:
+        r['approval_status_label'] = _APPROVAL_STATUS_KO.get(r['approval_status'], r['approval_status'])
+    can_approve = position_code in _APPROVAL_TIER
+    return JsonResponse({'success': True, 'list': rows, 'canApprove': can_approve})
+
+
+@csrf_exempt
+@require_jwt
+def approve_short_card(request, *args, **kwargs):
+    """짧카 재가/반려 — 전도팀장/지역장만, 그것도 같은 지역 짧카만."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    body = _json_body(request)
+    short_card_id = str(body.get('shortCardId') or '').strip()
+    status_map = {'재가': 'approved', '반려': 'rejected'}
+    enum_val = status_map.get(str(body.get('status') or '').strip())
+    if not short_card_id or not enum_val:
+        return JsonResponse({'success': False, 'message': 'shortCardId, status 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    ctx = _caller_ctx(client, sabun)
+    if ctx['position_code'] not in _APPROVAL_TIER:
+        return JsonResponse({'success': False, 'message': '전도팀장/지역장만 재가할 수 있어요'}, status=403)
+
+    card = client.query_one(
+        "SELECT MEMBER_ID FROM SHORT_CARDS WHERE SHORT_CARD_ID = :1 AND DELETED_AT IS NULL",
+        [short_card_id],
+    )
+    if not card:
+        return JsonResponse({'success': False, 'message': '짧카를 찾을 수 없어요'}, status=404)
+
+    author = client.query_one(
+        "SELECT REGION_CODE FROM MEMBER_AFFILIATION_HISTORIES WHERE MEMBER_ID = :1 AND IS_CURRENT = 1",
+        [card['member_id']],
+    )
+    if not author or author['region_code'] != ctx['region_code']:
+        return JsonResponse({'success': False, 'message': '같은 지역의 짧카만 재가할 수 있어요'}, status=403)
+
+    client.exec(
+        "UPDATE SHORT_CARDS SET APPROVAL_STATUS = :1, UPDATED_BY = :2 WHERE SHORT_CARD_ID = :3",
+        [enum_val, sabun, short_card_id],
+    )
+    return JsonResponse({'success': True, 'message': f"{_APPROVAL_STATUS_KO[enum_val]} 처리했어요"})
