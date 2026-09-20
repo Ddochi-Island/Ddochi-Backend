@@ -12,6 +12,14 @@ from api.clients.data_router import DataRouterClient
 _GENDERS = {'남', '여'}
 _RELIGIONS = {'무교', '기독교', '불교', '천주교', '기타'}
 
+# 밭 관리하기 RBAC 티어 — POSITION_CODE 기준(POSITION_NAME 아님, region_clerk와
+# area_secretary가 둘 다 "수서기"라 이름만으로는 구분 불가).
+_TIER_GLOBAL = {'admin', 'executive'}
+_TIER_REGION = {'team_lead', 'team_evangelist', 'region_lead',
+                 'region_general_secretary', 'region_clerk', 'region_mission_clerk'}
+_TIER_DISTRICT_ALL = {'area_lead'}
+_TIER_DISTRICT_GENERAL = {'sub_area_lead', 'team_clerk', 'team_mission_clerk', 'area_secretary'}
+
 
 def _json_body(request):
     try:
@@ -87,3 +95,60 @@ def submit_short_card(request, *args, **kwargs):
             [phone_normalized],
         )
     return JsonResponse({'success': True, 'message': '짧카 작성 완료!', 'duplicateInSarang': bool(sarang_dup)})
+
+
+@csrf_exempt
+@require_jwt
+def list_short_cards(request, *args, **kwargs):
+    """밭 관리하기 — 직책별 RBAC로 범위를 좁혀서 짧카 목록을 보여줌."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    ctx = client.query_one(
+        """SELECT mah.REGION_CODE, mah.DISTRICT_CODE, mpm.POSITION_CODE
+             FROM MEMBERS m
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+             LEFT JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = m.MEMBER_ID
+             LEFT JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+            WHERE m.MEMBER_ID = :1
+            ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
+            FETCH FIRST 1 ROWS ONLY""",
+        [sabun],
+    )
+    position_code = ctx['position_code'] if ctx else None
+    region_code = ctx['region_code'] if ctx else None
+    district_code = ctx['district_code'] if ctx else None
+
+    if position_code in _TIER_GLOBAL:
+        scope_sql, scope_args = '1=1', []
+    elif position_code in _TIER_REGION:
+        scope_sql = """sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
+                         WHERE REGION_CODE = :1 AND IS_CURRENT = 1)"""
+        scope_args = [region_code]
+    elif position_code in _TIER_DISTRICT_ALL:
+        scope_sql = """sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
+                         WHERE DISTRICT_CODE = :1 AND IS_CURRENT = 1)"""
+        scope_args = [district_code]
+    elif position_code in _TIER_DISTRICT_GENERAL:
+        scope_sql = """(sc.MEMBER_ID = :1 OR sc.MEMBER_ID IN (
+                         SELECT mah.MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES mah
+                           JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = mah.MEMBER_ID AND mpm.POSITION_CODE = 'general'
+                        WHERE mah.DISTRICT_CODE = :2 AND mah.IS_CURRENT = 1))"""
+        scope_args = [sabun, district_code]
+    else:
+        scope_sql, scope_args = 'sc.MEMBER_ID = :1', [sabun]
+
+    rows = client.query(
+        f"""SELECT sc.SHORT_CARD_ID, sc.NAME, sc.AGE, sc.GENDER, sc.SCHOOL_MAJOR,
+                   sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE, sc.CREATED_AT,
+                   m.NAME AS AUTHOR_NAME
+              FROM SHORT_CARDS sc
+              JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
+             WHERE sc.DELETED_AT IS NULL AND {scope_sql}
+             ORDER BY sc.CREATED_AT DESC""",
+        scope_args,
+    )
+    return JsonResponse({'success': True, 'list': rows})
