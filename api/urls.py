@@ -26,6 +26,7 @@ from .views import shed_report
 from .views import shed_users
 from .views import sheet_sync
 from .views import sheets
+from .views import short_card
 from .views import stats
 from .views import storage
 from .views import system
@@ -84,6 +85,7 @@ api_urlpatterns = [
     path('clone-row', assets.clone_row, name='assets_clone_row'),
     path('get-center-assets', assets.get_center_assets, name='assets_get_center_assets'),
     path('submit-habjaeyang-new', assets.submit_habjaeyang_new, name='assets_submit_habjaeyang_new'),
+    path('submit-short-card', short_card.submit_short_card, name='short_card_submit_short_card'),
     path('habjaeyang-dup-resolve', assets.habjaeyang_dup_resolve, name='assets_habjaeyang_dup_resolve'),
     path('shed-call-status', assets.shed_call_status, name='assets_shed_call_status'),
     path('shed-presence-leave', assets.shed_presence_leave, name='assets_shed_presence_leave'),
