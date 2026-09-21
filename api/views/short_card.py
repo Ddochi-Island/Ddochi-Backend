@@ -158,7 +158,7 @@ def list_short_cards(request, *args, **kwargs):
     rows = client.query(
         f"""SELECT sc.SHORT_CARD_ID, sc.NAME, sc.AGE, sc.GENDER, sc.SCHOOL_MAJOR,
                    sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE, sc.CREATED_AT,
-                   sc.APPROVAL_STATUS, m.NAME AS AUTHOR_NAME
+                   sc.APPROVAL_STATUS, sc.MEMBER_ID, m.NAME AS AUTHOR_NAME
               FROM SHORT_CARDS sc
               JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
              WHERE sc.DELETED_AT IS NULL AND {scope_sql}
