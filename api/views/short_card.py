@@ -24,6 +24,14 @@ _TIER_DISTRICT_GENERAL = {'sub_area_lead', 'team_clerk', 'team_mission_clerk', '
 _APPROVAL_TIER = {'team_evangelist', 'team_lead'}
 _APPROVAL_STATUS_KO = {'pending': '대기중', 'approved': '재가완료', 'rejected': '반려됨'}
 
+# 농부일지 필드 — 단계 판정에 쓰는 필드만(짧카 자체 필드 age/gender/phone/residence/
+# school_major/environment는 list_short_cards가 이미 내려주던 걸 그대로 씀).
+_JOURNAL_FIELDS = [
+    'faith_status', 'relation', 'personality', 'hobby', 'has_partner', 'family_relation',
+    'desired_image', 'recent_concern', 'family_atmosphere', 'human_relations',
+    'note_special', 'guide_comment',
+]
+
 
 def _json_body(request):
     try:
@@ -50,6 +58,39 @@ def _caller_ctx(client, sabun):
         'region_code': row['region_code'] if row else None,
         'district_code': row['district_code'] if row else None,
     }
+
+
+def _scope_sql(ctx, sabun):
+    """밭 관리하기 RBAC — list_short_cards/get_short_card_journal이 공유하는
+    "내가 볼 수 있는 SHORT_CARDS 범위" WHERE절. alias는 항상 sc."""
+    position_code = ctx['position_code']
+    if position_code in _TIER_GLOBAL:
+        return '1=1', []
+    if position_code in _TIER_REGION:
+        return ("""sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
+                     WHERE REGION_CODE = :1 AND IS_CURRENT = 1)""", [ctx['region_code']])
+    if position_code in _TIER_DISTRICT_ALL:
+        return ("""sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
+                     WHERE DISTRICT_CODE = :1 AND IS_CURRENT = 1)""", [ctx['district_code']])
+    if position_code in _TIER_DISTRICT_GENERAL:
+        return ("""(sc.MEMBER_ID = :1 OR sc.MEMBER_ID IN (
+                     SELECT mah.MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES mah
+                       JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = mah.MEMBER_ID AND mpm.POSITION_CODE = 'general'
+                    WHERE mah.DISTRICT_CODE = :2 AND mah.IS_CURRENT = 1))""", [sabun, ctx['district_code']])
+    return 'sc.MEMBER_ID = :1', [sabun]
+
+
+def _journal_stage(row):
+    """씨앗(기본)/새싹(2단계 완료)/떡잎(3단계 완료). 사용자 확정: 1단계 다 채워지면
+    씨앗, 2단계 다 채워지면 새싹, 3단계 다 채워지면 떡잎."""
+    s1 = all(row.get(k) for k in ('gender', 'age', 'relation', 'phone', 'residence'))
+    s2 = s1 and all(row.get(k) for k in ('school_major', 'personality', 'hobby', 'has_partner', 'family_relation', 'environment'))
+    s3 = s2 and all(row.get(k) for k in ('desired_image', 'recent_concern', 'family_atmosphere', 'human_relations'))
+    if s3:
+        return '떡잎'
+    if s2:
+        return '새싹'
+    return '씨앗'
 
 
 @csrf_exempt
@@ -133,32 +174,13 @@ def list_short_cards(request, *args, **kwargs):
 
     ctx = _caller_ctx(client, sabun)
     position_code = ctx['position_code']
-    region_code = ctx['region_code']
-    district_code = ctx['district_code']
+    scope_sql, scope_args = _scope_sql(ctx, sabun)
 
-    if position_code in _TIER_GLOBAL:
-        scope_sql, scope_args = '1=1', []
-    elif position_code in _TIER_REGION:
-        scope_sql = """sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
-                         WHERE REGION_CODE = :1 AND IS_CURRENT = 1)"""
-        scope_args = [region_code]
-    elif position_code in _TIER_DISTRICT_ALL:
-        scope_sql = """sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
-                         WHERE DISTRICT_CODE = :1 AND IS_CURRENT = 1)"""
-        scope_args = [district_code]
-    elif position_code in _TIER_DISTRICT_GENERAL:
-        scope_sql = """(sc.MEMBER_ID = :1 OR sc.MEMBER_ID IN (
-                         SELECT mah.MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES mah
-                           JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = mah.MEMBER_ID AND mpm.POSITION_CODE = 'general'
-                        WHERE mah.DISTRICT_CODE = :2 AND mah.IS_CURRENT = 1))"""
-        scope_args = [sabun, district_code]
-    else:
-        scope_sql, scope_args = 'sc.MEMBER_ID = :1', [sabun]
-
+    journal_cols = ', '.join(f'sc.{f.upper()}' for f in _JOURNAL_FIELDS)
     rows = client.query(
-        f"""SELECT sc.SHORT_CARD_ID, sc.NAME, sc.AGE, sc.GENDER, sc.SCHOOL_MAJOR,
+        f"""SELECT sc.SHORT_CARD_ID, sc.NAME, sc.AGE, sc.GENDER, sc.PHONE, sc.SCHOOL_MAJOR,
                    sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE, sc.CREATED_AT,
-                   sc.APPROVAL_STATUS, sc.MEMBER_ID, m.NAME AS AUTHOR_NAME
+                   sc.APPROVAL_STATUS, sc.MEMBER_ID, m.NAME AS AUTHOR_NAME, {journal_cols}
               FROM SHORT_CARDS sc
               JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
              WHERE sc.DELETED_AT IS NULL AND {scope_sql}
@@ -167,6 +189,7 @@ def list_short_cards(request, *args, **kwargs):
     )
     for r in rows:
         r['approval_status_label'] = _APPROVAL_STATUS_KO.get(r['approval_status'], r['approval_status'])
+        r['stage'] = _journal_stage(r) if r['approval_status'] == 'approved' else None
     can_approve = position_code in _APPROVAL_TIER
 
     if position_code in _TIER_GLOBAL:
@@ -221,3 +244,125 @@ def approve_short_card(request, *args, **kwargs):
         [enum_val, sabun, short_card_id],
     )
     return JsonResponse({'success': True, 'message': f"{_APPROVAL_STATUS_KO[enum_val]} 처리했어요"})
+
+
+@csrf_exempt
+@require_jwt
+def get_short_card_journal(request, *args, **kwargs):
+    """농부일지 상세 조회 — list_short_cards와 같은 RBAC 범위 밖이면 403."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    body = _json_body(request)
+    short_card_id = str(body.get('shortCardId') or '').strip()
+    if not short_card_id:
+        return JsonResponse({'success': False, 'message': 'shortCardId 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+    ctx = _caller_ctx(client, sabun)
+
+    journal_cols = ', '.join(f'sc.{f.upper()}' for f in _JOURNAL_FIELDS)
+    row = client.query_one(
+        f"""SELECT sc.SHORT_CARD_ID, sc.MEMBER_ID, sc.NAME, sc.AGE, sc.GENDER, sc.PHONE,
+                   sc.SCHOOL_MAJOR, sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE,
+                   sc.APPROVAL_STATUS, m.NAME AS AUTHOR_NAME, mah.REGION_CODE, mah.DISTRICT_CODE,
+                   {journal_cols}
+              FROM SHORT_CARDS sc
+              JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
+              LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = sc.MEMBER_ID AND mah.IS_CURRENT = 1
+             WHERE sc.SHORT_CARD_ID = :1 AND sc.DELETED_AT IS NULL""",
+        [short_card_id],
+    )
+    if not row:
+        return JsonResponse({'success': False, 'message': '짧카를 찾을 수 없어요'}, status=404)
+
+    is_author = row['member_id'] == sabun
+    position_code = ctx['position_code']
+    if is_author or position_code in _TIER_GLOBAL:
+        in_scope = True
+    elif position_code in _TIER_REGION:
+        in_scope = row['region_code'] == ctx['region_code']
+    elif position_code in _TIER_DISTRICT_ALL:
+        in_scope = row['district_code'] == ctx['district_code']
+    elif position_code in _TIER_DISTRICT_GENERAL:
+        in_scope = False
+        if row['district_code'] == ctx['district_code']:
+            author_general = client.query_one(
+                "SELECT 1 FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'general'",
+                [row['member_id']],
+            )
+            in_scope = bool(author_general)
+    else:
+        in_scope = False
+
+    if not in_scope:
+        return JsonResponse({'success': False, 'message': '볼 수 없는 짧카예요'}, status=403)
+
+    row['stage'] = _journal_stage(row) if row['approval_status'] == 'approved' else None
+    row['is_editable'] = is_author
+    return JsonResponse({'success': True, 'card': row})
+
+
+@csrf_exempt
+@require_jwt
+def save_short_card_journal(request, *args, **kwargs):
+    """농부일지 저장 — 인도자 본인만. 넘어온 필드만 부분 UPDATE."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    body = _json_body(request)
+    short_card_id = str(body.get('shortCardId') or '').strip()
+    if not short_card_id:
+        return JsonResponse({'success': False, 'message': 'shortCardId 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    card = client.query_one(
+        "SELECT MEMBER_ID FROM SHORT_CARDS WHERE SHORT_CARD_ID = :1 AND DELETED_AT IS NULL",
+        [short_card_id],
+    )
+    if not card:
+        return JsonResponse({'success': False, 'message': '짧카를 찾을 수 없어요'}, status=404)
+    if card['member_id'] != sabun:
+        return JsonResponse({'success': False, 'message': '인도자 본인만 농부일지를 쓸 수 있어요'}, status=403)
+
+    field_map = {
+        'faithStatus': 'FAITH_STATUS', 'relation': 'RELATION', 'personality': 'PERSONALITY',
+        'hobby': 'HOBBY', 'hasPartner': 'HAS_PARTNER', 'familyRelation': 'FAMILY_RELATION',
+        'desiredImage': 'DESIRED_IMAGE', 'recentConcern': 'RECENT_CONCERN',
+        'familyAtmosphere': 'FAMILY_ATMOSPHERE', 'humanRelations': 'HUMAN_RELATIONS',
+        'noteSpecial': 'NOTE_SPECIAL', 'guideComment': 'GUIDE_COMMENT',
+        # 짧카 시절 값도 이어서 갱신 가능(연락처/거주지 등 — 1/2단계 필드로 재사용).
+        'residence': 'RESIDENCE', 'schoolMajor': 'SCHOOL_MAJOR',
+        'environment': 'ENVIRONMENT', 'age': 'AGE', 'gender': 'GENDER',
+    }
+    data = body.get('data') or {}
+    sets, args_ = [], []
+    n = 1
+    for key, col in field_map.items():
+        if key not in data:
+            continue
+        val = data[key]
+        val = str(val).strip() or None if val is not None else None
+        sets.append(f'{col} = :{n}')
+        args_.append(val)
+        n += 1
+    if 'phone' in data:
+        phone = str(data['phone'] or '').strip() or None
+        sets.append(f'PHONE = :{n}')
+        args_.append(phone)
+        n += 1
+        sets.append(f'PHONE_NORMALIZED = :{n}')
+        args_.append(re.sub(r'[^0-9]', '', phone or '') or None)
+        n += 1
+    if not sets:
+        return JsonResponse({'success': False, 'message': '변경할 값이 없어요'}, status=400)
+    sets.append(f'UPDATED_BY = :{n}')
+    args_.append(sabun)
+    n += 1
+    args_.append(short_card_id)
+
+    client.exec(f"UPDATE SHORT_CARDS SET {', '.join(sets)} WHERE SHORT_CARD_ID = :{n}", args_)
+    return JsonResponse({'success': True, 'message': '농부일지 저장했어요!'})
