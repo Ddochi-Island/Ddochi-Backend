@@ -168,7 +168,17 @@ def list_short_cards(request, *args, **kwargs):
     for r in rows:
         r['approval_status_label'] = _APPROVAL_STATUS_KO.get(r['approval_status'], r['approval_status'])
     can_approve = position_code in _APPROVAL_TIER
-    return JsonResponse({'success': True, 'list': rows, 'canApprove': can_approve})
+
+    if position_code in _TIER_GLOBAL:
+        others_label = '전체의 밭'
+    elif position_code in _TIER_REGION:
+        others_label = '지역의 밭'
+    elif position_code in _TIER_DISTRICT_ALL or position_code in _TIER_DISTRICT_GENERAL:
+        others_label = '구역의 밭'
+    else:
+        others_label = None  # 회원 등 본인만 보이는 티어 — "남의 밭" 자체가 없음
+
+    return JsonResponse({'success': True, 'list': rows, 'canApprove': can_approve, 'othersLabel': others_label})
 
 
 @csrf_exempt
