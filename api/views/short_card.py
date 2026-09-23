@@ -124,8 +124,21 @@ def submit_short_card(request, *args, **kwargs):
         religion = None
     recruit_note = str(data.get('recruitNote') or '').strip() or None
 
-    sabun = request.user['sabun']
+    sabun = request.user['sabun']  # 실제 제출자 — CREATED_BY/UPDATED_BY로 남김
     client = DataRouterClient()
+
+    # 인도자 — 기본은 제출자 본인이지만, 명단에서 다른 사람을 고르면 그 사람 명의로 들어감
+    # (짧카 소유자=MEMBER_ID가 바뀜, RBAC 스코프/농부일지 전부 이 값 기준).
+    guide_name = str(data.get('guideName') or '').strip()
+    guide_sabun = sabun
+    if guide_name:
+        guide_row = client.query_one(
+            "SELECT MEMBER_ID FROM MEMBERS WHERE NAME = :1 AND DELETED_AT IS NULL FETCH FIRST 1 ROWS ONLY",
+            [guide_name],
+        )
+        if not guide_row:
+            return JsonResponse({'success': False, 'message': f'인도자 이름[{guide_name}]을 찾을 수 없어요'}, status=400)
+        guide_sabun = guide_row['member_id']
 
     if phone_normalized:
         dup = client.query_one(
@@ -136,7 +149,7 @@ def submit_short_card(request, *args, **kwargs):
             [phone_normalized],
         )
         if dup:
-            if dup['member_id'] == sabun:
+            if dup['member_id'] == guide_sabun:
                 return JsonResponse({'success': False, 'message': '이미 제출한 짧카입니다'}, status=400)
             return JsonResponse({
                 'success': False,
@@ -149,7 +162,7 @@ def submit_short_card(request, *args, **kwargs):
              (SHORT_CARD_ID, MEMBER_ID, NAME, AGE, GENDER, PHONE, PHONE_NORMALIZED,
               SCHOOL_MAJOR, ENVIRONMENT, RESIDENCE, RELIGION, RECRUIT_NOTE, CREATED_BY, UPDATED_BY)
            VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :13)""",
-        [short_card_id, sabun, name, age, gender, phone, phone_normalized,
+        [short_card_id, guide_sabun, name, age, gender, phone, phone_normalized,
          school_major, environment, residence, religion, recruit_note, sabun],
     )
 
