@@ -151,7 +151,12 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.WARNING(f'{pid}: no PERSONAL_INFO row for {personal_info_id}, skip'))
                 continue
 
-            inflow_member_id = p['manager_sabun'] or p['guide_sabun']
+            # 'SYSTEM'은 레거시의 시스템 플레이스홀더 사번(실제 담당자 없음) — NULL과
+            # 동급으로 취급. 실행 결과 REGION_CODE='0'으로 잡혀서 프론트 팀별 탭
+            # 어디에도 안 걸리는 게 실제로 발견돼서(2026-09-25) 추가한 가드.
+            manager = p['manager_sabun'] if p['manager_sabun'] != 'SYSTEM' else None
+            guide = p['guide_sabun'] if p['guide_sabun'] != 'SYSTEM' else None
+            inflow_member_id = manager or guide
             if not inflow_member_id:
                 skipped_no_owner += 1
                 continue
@@ -196,10 +201,10 @@ class Command(BaseCommand):
                 existing_sarang[sarang_key] = sarang_id
                 migrated += 1
 
-            if p['guide_sabun'] and sarang_id not in existing_inflow:
+            if guide and sarang_id not in existing_inflow:
                 dev.exec(
                     'INSERT INTO SARANG_INFLOW_DETAILS (SARANG_ID, INTRODUCER_MEMBER_ID) VALUES (:1, :2)',
-                    [sarang_id, p['guide_sabun']],
+                    [sarang_id, guide],
                 )
                 existing_inflow.add(sarang_id)
 
@@ -226,7 +231,7 @@ class Command(BaseCommand):
                     'APPROVAL_STATUS, REJECT_REASON, TEACHER_NAME_OVERRIDE, CREATED_AT'
                     f') VALUES (:1,:2,:3,:4,:5,:6,:7,{_tsx(8)},:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,:21,:22,:23,:24,:25,:26,:27,:28,:29,:30,:31,{_tsx(32)})',
                     [
-                        hjy_id, sarang_id, 1, p['guide_sabun'], hjy['tm_user_sabun'], p['teacher_sabun'],
+                        hjy_id, sarang_id, 1, guide, hjy['tm_user_sabun'], p['teacher_sabun'],
                         _trunc(p['tool'], 50), _ts(meeting['scheduled_at']) if meeting else None,
                         _trunc(meeting['place'], 100) if meeting else None,
                         hjy['gwacheon_min'], hjy['gwacheon_transfer'], hjy['center_min'], hjy['center_transfer'],
