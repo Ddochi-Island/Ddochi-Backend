@@ -8,11 +8,24 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
-from api.clients.data_router import DataRouterClient
+from api.clients.data_router import DataRouterClient, DataRouterError
 from api.util.business_date import get_business_date
 from api.views.assets import _member_id_by_name
 
 logger = logging.getLogger('api.views.daily_report')
+
+# 프론트(DailyReportScreen.vue)의 <select> 옵션은 값 자체가 한글 문구라 그대로
+# 저장하려 하면 DAILY_REPORTS.ACTIVITY CHECK 제약(none/online/offline/offlineSearch)에
+# 매번 위반됨 — 2026-09-25 실사용자 신고로 발견(제출할 때마다 500 나고 있었음,
+# 이 화면이 사실상 한 번도 정상 동작한 적 없었던 것으로 보임). 프론트는 안 건드리고
+# 여기서 왕복 변환.
+_ACTIVITY_KO_TO_CODE = {
+    '활동을 하지 못했어..': 'none',
+    '비대면 활동!': 'online',
+    '대면 활동!': 'offline',
+    '오프찾 했어!': 'offlineSearch',
+}
+_ACTIVITY_CODE_TO_KO = {v: k for k, v in _ACTIVITY_KO_TO_CODE.items()}
 
 
 def _json_body(request):
@@ -83,7 +96,7 @@ def daily_report_get(request, *args, **kwargs):
     return JsonResponse({
         'success': True, 'exists': True,
         'data': {
-            'activity': row['activity'],
+            'activity': _ACTIVITY_CODE_TO_KO.get(row['activity'], row['activity']),
             'talkCount': int(row['talk_count'] or 0),
             'dmCount': int(row['dm_count'] or 0),
             'qrCount': int(row['qr_count'] or 0),
@@ -108,7 +121,8 @@ def daily_report(request, *args, **kwargs):
     body = _json_body(request)
     name = str(body.get('name') or '').strip()
     date_key = str(body.get('dateKey') or body.get('confirmedDateKey') or '').strip() or get_business_date()
-    activity = str(body.get('activity') or 'none').strip()
+    activity_raw = str(body.get('activity') or '').strip()
+    activity = _ACTIVITY_KO_TO_CODE.get(activity_raw, activity_raw) or 'none'
     if not name:
         return JsonResponse({'success': False, 'message': 'name 필요'}, status=400)
 
@@ -128,32 +142,36 @@ def daily_report(request, *args, **kwargs):
 
     reg_list_json = json.dumps(body.get('regList') or [])
 
-    client.exec(
-        """MERGE INTO DAILY_REPORTS dr
-           USING (SELECT TO_DATE(:1, 'YYYY-MM-DD') AS REPORT_DATE, :2 AS MEMBER_ID FROM dual) src
-              ON (dr.REPORT_DATE = src.REPORT_DATE AND dr.MEMBER_ID = src.MEMBER_ID)
-         WHEN MATCHED THEN UPDATE SET
-                AUTHOR_MEMBER_ID = :3, ACTIVITY = :4, TALK_COUNT = :5, DM_COUNT = :6,
-                QR_COUNT = :7, ONLINE_INTAKE_COUNT = :8, PROMO_LIST = :9, REG_LIST = :10,
-                IS_FINAL = :11, SNAP_REGION_CODE = :12, SNAP_DISTRICT_CODE = :13,
-                SUBMITTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP, UPDATED_BY = :14
-         WHEN NOT MATCHED THEN INSERT
-                (REPORT_DATE, MEMBER_ID, AUTHOR_MEMBER_ID, ACTIVITY, TALK_COUNT, DM_COUNT,
-                 QR_COUNT, ONLINE_INTAKE_COUNT, PROMO_LIST, REG_LIST, IS_FINAL,
-                 SNAP_REGION_CODE, SNAP_DISTRICT_CODE, CREATED_BY, UPDATED_BY)
-              VALUES (TO_DATE(:15, 'YYYY-MM-DD'), :16, :17, :18, :19, :20,
-                      :21, :22, :23, :24, :25, :26, :27, :28, :29)""",
-        [
-            date_key, member_id,
-            author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
-            _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
-            1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'],
-            author_sabun,
-            date_key, member_id, author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
-            _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
-            1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'], author_sabun, author_sabun,
-        ],
-    )
+    try:
+        client.exec(
+            """MERGE INTO DAILY_REPORTS dr
+               USING (SELECT TO_DATE(:1, 'YYYY-MM-DD') AS REPORT_DATE, :2 AS MEMBER_ID FROM dual) src
+                  ON (dr.REPORT_DATE = src.REPORT_DATE AND dr.MEMBER_ID = src.MEMBER_ID)
+             WHEN MATCHED THEN UPDATE SET
+                    AUTHOR_MEMBER_ID = :3, ACTIVITY = :4, TALK_COUNT = :5, DM_COUNT = :6,
+                    QR_COUNT = :7, ONLINE_INTAKE_COUNT = :8, PROMO_LIST = :9, REG_LIST = :10,
+                    IS_FINAL = :11, SNAP_REGION_CODE = :12, SNAP_DISTRICT_CODE = :13,
+                    SUBMITTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP, UPDATED_BY = :14
+             WHEN NOT MATCHED THEN INSERT
+                    (REPORT_DATE, MEMBER_ID, AUTHOR_MEMBER_ID, ACTIVITY, TALK_COUNT, DM_COUNT,
+                     QR_COUNT, ONLINE_INTAKE_COUNT, PROMO_LIST, REG_LIST, IS_FINAL,
+                     SNAP_REGION_CODE, SNAP_DISTRICT_CODE, CREATED_BY, UPDATED_BY)
+                  VALUES (TO_DATE(:15, 'YYYY-MM-DD'), :16, :17, :18, :19, :20,
+                          :21, :22, :23, :24, :25, :26, :27, :28, :29)""",
+            [
+                date_key, member_id,
+                author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
+                _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
+                1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'],
+                author_sabun,
+                date_key, member_id, author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
+                _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
+                1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'], author_sabun, author_sabun,
+            ],
+        )
+    except DataRouterError as e:
+        logger.warning('[daily_report] MERGE failed: %s', e)
+        return JsonResponse({'success': False, 'message': f'저장 실패: {e}'}, status=500)
 
     if target_ctx['team_id'] and target_ctx['team_id'] != '0':
         try:

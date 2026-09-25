@@ -11,7 +11,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
-from api.clients.data_router import DataRouterClient
+from api.clients.data_router import DataRouterClient, DataRouterError
 from api.telegram.habjaeyang import send_habjaeyang_to_telegram
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
@@ -75,6 +75,19 @@ def _parse_transfer_label(label):
 
 def _ox(v):
     return 1 if str(v or '').strip().upper() == 'O' else 0
+
+
+def _trunc(s, max_bytes):
+    # SARANG_HAB_JAE_YANG 등 일부 컬럼은 소스엔 "VARCHAR2(n CHAR)"로 돼있지만
+    # 실배포는 바이트 세맨틱스(CHAR_USED='B', 2026-09-25 마이그레이션 중 실측 확인) —
+    # 긴 한글 자유텍스트 입력 시 ORA-12899로 저장 자체가 실패하는 걸 실사용자가
+    # 실제로 겪음(합재양 "일정" 필드). 문자수 아니라 바이트 기준으로 잘라야 함.
+    if not s:
+        return s
+    b = s.encode('utf-8')
+    if len(b) <= max_bytes:
+        return s
+    return b[:max_bytes].decode('utf-8', errors='ignore')
 
 
 def _member_id_by_name(client, name):
@@ -589,17 +602,17 @@ def submit_result(request, *args, **kwargs):
 
         hj_args_common = [
             guide_id, caller_id,
-            str(hj.get('path') or '').strip() or None, str(hj.get('tool') or '').strip() or None,
+            _trunc(str(hj.get('path') or '').strip() or None, 50), _trunc(str(hj.get('tool') or '').strip() or None, 50),
             _ox(hj.get('verbalManFix')),
-            mt_datetime, mt_datetime, str(hj.get('mtPlace') or '').strip() or None,
+            mt_datetime, mt_datetime, _trunc(str(hj.get('mtPlace') or '').strip() or None, 100),
             _parse_min_label(hj.get('gwacheonMin')), _parse_transfer_label(hj.get('gwacheonTransfer')),
             _parse_min_label(hj.get('centerMin')), _parse_transfer_label(hj.get('centerTransfer')),
-            str(hj.get('job') or '').strip() or None, str(hj.get('sch') or '').strip() or None,
-            str(hj.get('plan') or '').strip() or None, str(hj.get('purpose') or '').strip() or None,
-            str(hj.get('selfImage') or '').strip() or None, str(hj.get('trouble') or '').strip() or None,
-            str(hj.get('att') or '').strip() or None, str(hj.get('wary') or '').strip() or None,
-            str(hj.get('dist') or '').strip() or None,
-            str(hj.get('qna') or '').strip() or None, str(hj.get('etc') or '').strip() or None,
+            _trunc(str(hj.get('job') or '').strip() or None, 100), _trunc(str(hj.get('sch') or '').strip() or None, 100),
+            _trunc(str(hj.get('plan') or '').strip() or None, 255), _trunc(str(hj.get('purpose') or '').strip() or None, 255),
+            _trunc(str(hj.get('selfImage') or '').strip() or None, 255), _trunc(str(hj.get('trouble') or '').strip() or None, 255),
+            _trunc(str(hj.get('att') or '').strip() or None, 255), _trunc(str(hj.get('wary') or '').strip() or None, 255),
+            _trunc(str(hj.get('dist') or '').strip() or None, 255),
+            _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc(str(hj.get('etc') or '').strip() or None, 255),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ]
 
@@ -1152,16 +1165,16 @@ def submit_habjaeyang_new(request, *args, **kwargs):
                           :19, :20, :21, :22, :23,
                           :24, :25, :26, :27, :28)""",
         'args': [
-            uuid.uuid4().hex.upper(), sarang_id, guide_id, caller_id, path_val, tool_val, _ox(hj.get('verbalManFix')),
-            mt_datetime, mt_datetime, str(hj.get('mtPlace') or '').strip() or None,
+            uuid.uuid4().hex.upper(), sarang_id, guide_id, caller_id, _trunc(path_val, 50), _trunc(tool_val, 50), _ox(hj.get('verbalManFix')),
+            mt_datetime, mt_datetime, _trunc(str(hj.get('mtPlace') or '').strip() or None, 100),
             _parse_min_label(hj.get('gwacheonMin')), _parse_transfer_label(hj.get('gwacheonTransfer')),
             _parse_min_label(hj.get('centerMin')), _parse_transfer_label(hj.get('centerTransfer')),
-            str(hj.get('job') or '').strip() or None, str(hj.get('sch') or '').strip() or None,
-            str(hj.get('plan') or '').strip() or None, str(hj.get('purpose') or '').strip() or None,
-            str(hj.get('selfImage') or '').strip() or None, str(hj.get('trouble') or '').strip() or None,
-            str(hj.get('att') or '').strip() or None, str(hj.get('wary') or '').strip() or None,
-            str(hj.get('dist') or '').strip() or None,
-            str(hj.get('qna') or '').strip() or None, str(hj.get('etc') or '').strip() or None,
+            _trunc(str(hj.get('job') or '').strip() or None, 100), _trunc(str(hj.get('sch') or '').strip() or None, 100),
+            _trunc(str(hj.get('plan') or '').strip() or None, 255), _trunc(str(hj.get('purpose') or '').strip() or None, 255),
+            _trunc(str(hj.get('selfImage') or '').strip() or None, 255), _trunc(str(hj.get('trouble') or '').strip() or None, 255),
+            _trunc(str(hj.get('att') or '').strip() or None, 255), _trunc(str(hj.get('wary') or '').strip() or None, 255),
+            _trunc(str(hj.get('dist') or '').strip() or None, 255),
+            _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc(str(hj.get('etc') or '').strip() or None, 255),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ],
     })
@@ -1171,7 +1184,11 @@ def submit_habjaeyang_new(request, *args, **kwargs):
         'args': [uuid.uuid4().hex.upper(), sarang_id, sabun],
     })
 
-    client.tx(stmts)
+    try:
+        client.tx(stmts)
+    except DataRouterError as e:
+        logging.getLogger('api.views.assets').warning('[submit_habjaeyang_new] tx failed: %s', e)
+        return JsonResponse({'success': False, 'message': f'저장 실패: {e}'}, status=500)
 
     try:
         send_habjaeyang_to_telegram(client, sarang_id)
