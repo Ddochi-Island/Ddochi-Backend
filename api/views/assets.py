@@ -114,7 +114,13 @@ def get_assets(request, *args, **kwargs):
     프론트(MatchingScreen.vue)는 그대로 두고 예전과 같은 shape(approvalStatus/
     matchResultDetail/habjaeyang/logs/meetings)을 맞춰서 내려줌 — 내 팀(담당자 소속팀)
     것만 보여줌(레거시 assets.js/prospectsRepo.listTeamProspects의 TEAM_ID 스코프 그대로;
-    2026-09-25까지 포팅 중 누락돼있었음 — dev DB에 한 팀 데이터만 있을 땐 안 드러났었음)."""
+    2026-09-25까지 포팅 중 누락돼있었음 — dev DB에 한 팀 데이터만 있을 땐 안 드러났었음).
+    기간 윈도우: 최근 30일 이내 생성분 OR 결과가 이미 난 건(STAGE가 상따/성홀/성따/
+    복방/센 중 하나거나 SARANG_MATCH_HISTORIES.RESULT가 있는 경우) — 오래됐어도
+    결과 난 건 계속 보여야 해서 30일 컷에서 예외로 둠(2026-09-25, 사용자 요청으로
+    90일→30일+결과-예외로 변경). STAGE 조건이 필요한 이유: 마이그레이션한 실서버
+    데이터엔 SARANG_MATCH_HISTORIES가 없어서(범위 밖으로 뺐음) RESULT 체크만으론
+    아무 효과가 없었음 — STAGE로 실질적인 예외를 만듦."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -156,7 +162,14 @@ def get_assets(request, *args, **kwargs):
             WHERE mah.REGION_CODE = :1
               AND s.STAGE NOT IN ('유입', '티엠')
               AND s.DELETED_AT IS NULL
-              AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '90' DAY
+              AND (
+                s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY
+                OR s.STAGE IN ('상따', '성홀', '성따', '복방', '센')
+                OR EXISTS (
+                  SELECT 1 FROM SARANG_MATCH_HISTORIES smh
+                   WHERE smh.SARANG_ID = s.SARANG_ID AND smh.RESULT IS NOT NULL
+                )
+              )
             ORDER BY s.CREATED_AT DESC
             FETCH FIRST 1000 ROWS ONLY""",
         [team_id],
