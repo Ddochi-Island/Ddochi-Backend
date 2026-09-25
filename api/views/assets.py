@@ -112,12 +112,17 @@ def get_assets(request, *args, **kwargs):
     """TM 만남픽스 이후 ~ 매칭 종료까지 다루는 '매칭 절대 지켜!' 화면 데이터.
     services/main/src/routes/assets.js의 GET /get-assets를 새 SARANG 스키마로 재구현.
     프론트(MatchingScreen.vue)는 그대로 두고 예전과 같은 shape(approvalStatus/
-    matchResultDetail/habjaeyang/logs/meetings)을 맞춰서 내려줌 — 팀 스코프는 get-shed-
-    prospects와 같은 이유로 안 둠(프론트가 팀으로 안 좁힘)."""
+    matchResultDetail/habjaeyang/logs/meetings)을 맞춰서 내려줌 — 내 팀(담당자 소속팀)
+    것만 보여줌(레거시 assets.js/prospectsRepo.listTeamProspects의 TEAM_ID 스코프 그대로;
+    2026-09-25까지 포팅 중 누락돼있었음 — dev DB에 한 팀 데이터만 있을 땐 안 드러났었음)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
+    sabun = request.user['sabun']
     client = DataRouterClient()
+    ctx = get_author_context(sabun)
+    team_id = ctx['team_id']
+
     rows = client.query(
         """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.GENDER, s.MBTI, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
@@ -137,6 +142,7 @@ def get_assets(request, *args, **kwargs):
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN MEMBERS im ON im.MEMBER_ID = s.INFLOW_MEMBER_ID
+             JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
              LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
              LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = hj.GUIDE_MEMBER_ID
              LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = hj.CALLER_MEMBER_ID
@@ -147,11 +153,13 @@ def get_assets(request, *args, **kwargs):
                       ROW_NUMBER() OVER (PARTITION BY SARANG_ID ORDER BY CREATED_AT DESC) AS RN
                  FROM TM_LOGS WHERE RESULT = 'MEET_FIX'
              ) mf ON mf.SARANG_ID = s.SARANG_ID AND mf.RN = 1
-            WHERE s.STAGE NOT IN ('유입', '티엠')
+            WHERE mah.REGION_CODE = :1
+              AND s.STAGE NOT IN ('유입', '티엠')
               AND s.DELETED_AT IS NULL
               AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '90' DAY
             ORDER BY s.CREATED_AT DESC
-            FETCH FIRST 1000 ROWS ONLY"""
+            FETCH FIRST 1000 ROWS ONLY""",
+        [team_id],
     )
 
     sarang_ids = [r['sarang_id'] for r in rows]
@@ -309,8 +317,7 @@ def get_assets(request, *args, **kwargs):
 @require_jwt
 def get_matching_history(request, *args, **kwargs):
     """매칭 절대 지켜!의 "📋 히스토리" 화면 — 날짜 범위로 매칭 시도(SARANG_MATCH_HISTORIES)를
-    조회. 내 팀(담당자 소속팀) 것만 — 히스토리는 기간이 넓어서 get-assets(90일/전체)와
-    달리 팀으로 좁힘(레거시 정합)."""
+    조회. get_assets와 마찬가지로 내 팀(담당자 소속팀) 것만(레거시 정합)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
