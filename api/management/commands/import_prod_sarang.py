@@ -95,12 +95,19 @@ class Command(BaseCommand):
             "SELECT p.PROSPECT_ID, p.PERSONAL_INFO_ID, p.MANAGER_SABUN, p.GUIDE_SABUN, "
             "p.TEACHER_SABUN, p.TEACHER_NAME, p.STATUS, p.APPROVAL_STATUS, p.TM_STATUS, "
             "p.AGE, p.GENDER, p.ON_OFF, p.TOOL, p.PATH, p.DROPPED_REASON, "
-            "p.INTRODUCER_NAME, p.SHED_RESERVED_AT, p.TM_NOTE, "
+            "p.INTRODUCER_NAME, p.SHED_RESERVED_AT, p.TM_NOTE, p.SNAP_AREA_ID, "
             "p.CREATED_AT, p.UPDATED_AT, p.CREATED_BY, p.UPDATED_BY "
             "FROM PROSPECTS p WHERE p.IS_DROPPED = '0'",
             fetch_limit=FETCH_LIMIT,
         )
         self.stdout.write(f'{len(prospects)} active prospects fetched from prod')
+
+        # SNAP_AREA_ID(등록 당시 구역 스냅샷) → AREAS.DISPLAY_NAME("7구역" 등) →
+        # SARANG_INFLOW_DETAILS.REGION_NAME. AREA_ID/TEAM_ID가 둘 다 '0'인 플레이스홀더
+        # 행("0구역")이 실제로 있어서(미지정 상태) SNAP_AREA_ID='0'은 실제 구역이 아님 —
+        # 'SYSTEM' 사번 가드와 같은 이유로 걸러야 함(2026-09-25 실데이터로 발견).
+        area_names = prod.query('SELECT AREA_ID, DISPLAY_NAME FROM AREAS', fetch_limit=FETCH_LIMIT)
+        area_id_to_name = {a['area_id']: a['display_name'] for a in area_names if a['area_id'] != '0'}
 
         # PROSPECTS.INTRODUCER_NAME(진짜 유입자 자유텍스트 — GUIDE_SABUN 담당자와
         # 80% 다른 사람이었음, 2026-09-25 발견)을 MEMBERS 이름으로 역매핑. 동명이인은
@@ -243,8 +250,9 @@ class Command(BaseCommand):
             if p['shed_reserved_at']:
                 naive = datetime.fromisoformat(p['shed_reserved_at'])
                 tm_reserved_at = _ts((naive - _KST_OFFSET).isoformat() + 'Z')
+            region_name = area_id_to_name.get(p['snap_area_id'])
 
-            if (introducer_member_id or reaction or tm_reserved_at) and sarang_id not in existing_inflow:
+            if (introducer_member_id or reaction or tm_reserved_at or region_name) and sarang_id not in existing_inflow:
                 cols = ['SARANG_ID']
                 vals_sql = [':1']
                 vals = [sarang_id]
@@ -260,6 +268,10 @@ class Command(BaseCommand):
                     cols.append('TM_RESERVED_AT')
                     vals_sql.append(_tsx(len(vals) + 1))
                     vals.append(tm_reserved_at)
+                if region_name:
+                    cols.append('REGION_NAME')
+                    vals_sql.append(f':{len(vals)+1}')
+                    vals.append(region_name)
                 dev.exec(
                     f'INSERT INTO SARANG_INFLOW_DETAILS ({", ".join(cols)}) VALUES ({", ".join(vals_sql)})',
                     vals,
