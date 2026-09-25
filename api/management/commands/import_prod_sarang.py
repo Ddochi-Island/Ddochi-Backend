@@ -86,7 +86,7 @@ class Command(BaseCommand):
         prospects = prod.query(
             "SELECT p.PROSPECT_ID, p.PERSONAL_INFO_ID, p.MANAGER_SABUN, p.GUIDE_SABUN, "
             "p.TEACHER_SABUN, p.TEACHER_NAME, p.STATUS, p.APPROVAL_STATUS, p.TM_STATUS, "
-            "p.AGE, p.GENDER, p.ON_OFF, p.TOOL, p.DROPPED_REASON, "
+            "p.AGE, p.GENDER, p.ON_OFF, p.TOOL, p.PATH, p.DROPPED_REASON, "
             "p.CREATED_AT, p.UPDATED_AT, p.CREATED_BY, p.UPDATED_BY "
             "FROM PROSPECTS p WHERE p.IS_DROPPED = '0'",
             fetch_limit=FETCH_LIMIT,
@@ -224,15 +224,15 @@ class Command(BaseCommand):
                 dev.exec(
                     'INSERT INTO SARANG_HAB_JAE_YANG ('
                     'HAB_JAE_YANG_ID, SARANG_ID, IS_ACTIVE, GUIDE_MEMBER_ID, CALLER_MEMBER_ID, TEACHER_MEMBER_ID, '
-                    'TOOL, MATCH_SCHEDULED_AT, MATCH_LOCATION, GWACHEON_TRAVEL_TIME, GWACHEON_TRANSFER_COUNT, '
+                    'ROUTE, TOOL, MATCH_SCHEDULED_AT, MATCH_LOCATION, GWACHEON_TRAVEL_TIME, GWACHEON_TRANSFER_COUNT, '
                     'CENTER_TRAVEL_TIME, CENTER_TRANSFER_COUNT, SCHOOL_MAJOR_JOB, SCHEDULE, APPLICATION_PURPOSE, '
                     'SELF_IMAGE, CHARACTER_NOTE, ALERT_NOTE, DISTANCE_BURDEN, QNA, ETC, HAS_CENTER_ENV, '
                     'IS_TAKING_MEDS, HAS_MENTAL_ILLNESS, HAS_REPLIED, IS_WINDOW_OPENED, IS_JAE_GA, '
                     'APPROVAL_STATUS, REJECT_REASON, TEACHER_NAME_OVERRIDE, CREATED_AT'
-                    f') VALUES (:1,:2,:3,:4,:5,:6,:7,{_tsx(8)},:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,:21,:22,:23,:24,:25,:26,:27,:28,:29,:30,:31,{_tsx(32)})',
+                    f') VALUES (:1,:2,:3,:4,:5,:6,:7,:8,{_tsx(9)},:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,:21,:22,:23,:24,:25,:26,:27,:28,:29,:30,:31,:32,{_tsx(33)})',
                     [
                         hjy_id, sarang_id, 1, guide, hjy['tm_user_sabun'], p['teacher_sabun'],
-                        _trunc(p['tool'], 50), _ts(meeting['scheduled_at']) if meeting else None,
+                        _trunc(p['path'], 50), _trunc(p['tool'], 50), _ts(meeting['scheduled_at']) if meeting else None,
                         _trunc(meeting['place'], 100) if meeting else None,
                         hjy['gwacheon_min'], hjy['gwacheon_transfer'], hjy['center_min'], hjy['center_transfer'],
                         _trunc(hjy['job'], 100), _trunc(hjy['schedule_text'], 100), _trunc(hjy['purpose'], 255),
