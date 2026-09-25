@@ -12,14 +12,16 @@
 #
 # PERSONAL_INFO_ID는 레거시 HASH_ID를 그대로 재사용(둘 다 SHA-256(name+phone) —
 # 동일인 재신청 시 자동 연결되는 동작 유지). 프로덕션 쪽은 SELECT만 사용.
+import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.core.management.base import BaseCommand
 
 from api.clients.data_router import DataRouterClient, DataRouterError
 
 _OUTCOME_SANGDAN = '⭕️상담따기'
+_KST_OFFSET = timedelta(hours=9)
 _TS_MASK = 'YYYY-MM-DD"T"HH24:MI:SS.FF6"Z"'
 
 
@@ -28,6 +30,12 @@ def _ts(iso_str):
     # 소수점 이하를 통째로 생략함('...13:00:00Z' vs '...04:26:57.050827Z') —
     # 고정폭 TO_TIMESTAMP_TZ 마스크로 바로 바인딩하면 그 경우만 ORA-01843 남.
     # 여기서 항상 마이크로초 6자리로 맞춰서 반환.
+    #
+    # 주의: 결과는 항상 'Z'(UTC)로 라벨링됨 — UTC가 아닌 오프셋(예: '+09:00')을
+    # 넣으면 실제 시각 변환 없이 그 wall-clock 숫자에 그냥 'Z'만 붙임(9시간 밀리는
+    # 버그를 한 번 실제로 냄 — SHED_RESERVED_AT처럼 타임존 없는 KST 문자열을
+    # 여기 넣을 땐 반드시 미리 UTC로 변환하고 넣을 것, 또는 결과에서 직접 시차만큼
+    # 보정할 것).
     if not iso_str:
         return None
     dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
@@ -87,11 +95,28 @@ class Command(BaseCommand):
             "SELECT p.PROSPECT_ID, p.PERSONAL_INFO_ID, p.MANAGER_SABUN, p.GUIDE_SABUN, "
             "p.TEACHER_SABUN, p.TEACHER_NAME, p.STATUS, p.APPROVAL_STATUS, p.TM_STATUS, "
             "p.AGE, p.GENDER, p.ON_OFF, p.TOOL, p.PATH, p.DROPPED_REASON, "
+            "p.INTRODUCER_NAME, p.SHED_RESERVED_AT, p.TM_NOTE, "
             "p.CREATED_AT, p.UPDATED_AT, p.CREATED_BY, p.UPDATED_BY "
             "FROM PROSPECTS p WHERE p.IS_DROPPED = '0'",
             fetch_limit=FETCH_LIMIT,
         )
         self.stdout.write(f'{len(prospects)} active prospects fetched from prod')
+
+        # PROSPECTS.INTRODUCER_NAME(진짜 유입자 자유텍스트 — GUIDE_SABUN 담당자와
+        # 80% 다른 사람이었음, 2026-09-25 발견)을 MEMBERS 이름으로 역매핑. 동명이인은
+        # 안전하게 매칭 포기(그 경우 GUIDE_SABUN으로 폴백).
+        introducer_names = {p['introducer_name'] for p in prospects if p['introducer_name']}
+        introducer_name_to_id = {}
+        if introducer_names:
+            placeholders = ','.join(f":{i+1}" for i in range(len(introducer_names)))
+            name_list = list(introducer_names)
+            dupe_names = set()
+            for m in dev.query(f'SELECT MEMBER_ID, NAME FROM MEMBERS WHERE NAME IN ({placeholders})', name_list, fetch_limit=FETCH_LIMIT):
+                if m['name'] in introducer_name_to_id:
+                    dupe_names.add(m['name'])
+                introducer_name_to_id[m['name']] = m['member_id']
+            for d in dupe_names:
+                introducer_name_to_id.pop(d, None)
 
         pi_rows = prod.query(
             'SELECT HASH_ID, NAME, PHONE, PHONE_NORMALIZED, RESIDENCE, CREATED_AT FROM PERSONAL_INFO',
@@ -201,10 +226,43 @@ class Command(BaseCommand):
                 existing_sarang[sarang_key] = sarang_id
                 migrated += 1
 
-            if guide and sarang_id not in existing_inflow:
+            introducer_member_id = introducer_name_to_id.get(p['introducer_name']) or guide
+            reaction = None
+            if p['tm_note']:
+                try:
+                    note = json.loads(p['tm_note'])
+                    text = (note.get('text') or '').strip()
+                    reaction = _trunc(text, 100) if text else None
+                except (TypeError, ValueError):
+                    pass
+            # SHED_RESERVED_AT은 TIMESTAMP WITH TIME ZONE이 아니라 그냥 VARCHAR2라
+            # 타임존 정보가 없음 — 한국 앱이라 KST(+09:00)로 간주. _ts()는 입력에
+            # 오프셋이 있어도 무조건 'Z'로 라벨링해버리므로(위 _ts 주석 참고) UTC로
+            # 직접 변환한 뒤 넘겨야 함 — 안 그러면 9시간 밀린 채로 저장됨(실제로 한 번 냄).
+            tm_reserved_at = None
+            if p['shed_reserved_at']:
+                naive = datetime.fromisoformat(p['shed_reserved_at'])
+                tm_reserved_at = _ts((naive - _KST_OFFSET).isoformat() + 'Z')
+
+            if (introducer_member_id or reaction or tm_reserved_at) and sarang_id not in existing_inflow:
+                cols = ['SARANG_ID']
+                vals_sql = [':1']
+                vals = [sarang_id]
+                if introducer_member_id:
+                    cols.append('INTRODUCER_MEMBER_ID')
+                    vals_sql.append(f':{len(vals)+1}')
+                    vals.append(introducer_member_id)
+                if reaction:
+                    cols.append('REACTION')
+                    vals_sql.append(f':{len(vals)+1}')
+                    vals.append(reaction)
+                if tm_reserved_at:
+                    cols.append('TM_RESERVED_AT')
+                    vals_sql.append(_tsx(len(vals) + 1))
+                    vals.append(tm_reserved_at)
                 dev.exec(
-                    'INSERT INTO SARANG_INFLOW_DETAILS (SARANG_ID, INTRODUCER_MEMBER_ID) VALUES (:1, :2)',
-                    [sarang_id, guide],
+                    f'INSERT INTO SARANG_INFLOW_DETAILS ({", ".join(cols)}) VALUES ({", ".join(vals_sql)})',
+                    vals,
                 )
                 existing_inflow.add(sarang_id)
 
