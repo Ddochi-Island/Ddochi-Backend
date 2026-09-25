@@ -70,13 +70,18 @@ def _scope_sql(ctx, sabun):
         return ("""sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
                      WHERE REGION_CODE = :1 AND IS_CURRENT = 1)""", [ctx['region_code']])
     if position_code in _TIER_DISTRICT_ALL:
+        # DISTRICT_CODE는 지역마다 독립적으로 매겨져서(1~7이 전 지역에서 다 재사용됨)
+        # REGION_CODE를 같이 안 걸면 다른 지역의 같은 번호 구역이 섞여 보임 —
+        # 2026-09-25 실사용자 신고로 발견.
         return ("""sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
-                     WHERE DISTRICT_CODE = :1 AND IS_CURRENT = 1)""", [ctx['district_code']])
+                     WHERE REGION_CODE = :1 AND DISTRICT_CODE = :2 AND IS_CURRENT = 1)""",
+                [ctx['region_code'], ctx['district_code']])
     if position_code in _TIER_DISTRICT_GENERAL:
         return ("""(sc.MEMBER_ID = :1 OR sc.MEMBER_ID IN (
                      SELECT mah.MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES mah
                        JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = mah.MEMBER_ID AND mpm.POSITION_CODE = 'general'
-                    WHERE mah.DISTRICT_CODE = :2 AND mah.IS_CURRENT = 1))""", [sabun, ctx['district_code']])
+                    WHERE mah.REGION_CODE = :2 AND mah.DISTRICT_CODE = :3 AND mah.IS_CURRENT = 1))""",
+                [sabun, ctx['region_code'], ctx['district_code']])
     return 'sc.MEMBER_ID = :1', [sabun]
 
 
@@ -297,10 +302,12 @@ def get_short_card_journal(request, *args, **kwargs):
     elif position_code in _TIER_REGION:
         in_scope = row['region_code'] == ctx['region_code']
     elif position_code in _TIER_DISTRICT_ALL:
-        in_scope = row['district_code'] == ctx['district_code']
+        # DISTRICT_CODE는 지역마다 독립적으로 매겨짐(1~7이 전 지역에서 재사용) —
+        # REGION_CODE도 같이 맞아야 진짜 같은 구역(_scope_sql과 동일 이유로 수정).
+        in_scope = row['region_code'] == ctx['region_code'] and row['district_code'] == ctx['district_code']
     elif position_code in _TIER_DISTRICT_GENERAL:
         in_scope = False
-        if row['district_code'] == ctx['district_code']:
+        if row['region_code'] == ctx['region_code'] and row['district_code'] == ctx['district_code']:
             author_general = client.query_one(
                 "SELECT 1 FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'general'",
                 [row['member_id']],
