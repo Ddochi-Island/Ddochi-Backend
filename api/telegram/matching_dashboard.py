@@ -27,9 +27,12 @@ def _fmt_md(date_str):
 
 
 def _fetch_rows(client, team_id):
-    """팀의 활성 사랑이(재가 이후, 최근 60일)에 대해 SARANG_MATCH_HISTORIES 전체 시도를
+    """팀의 활성 사랑이(재가 이후, 최근 30일)에 대해 SARANG_MATCH_HISTORIES 전체 시도를
     시간순으로 가져옴 — 밀림/2차만남 다음 날짜를 보여주려면 시도 하나가 아니라
-    사람당 전체 이력이 필요함(get_assets의 match_by_id 2-pass와 같은 이유)."""
+    사람당 전체 이력이 필요함(get_assets의 match_by_id 2-pass와 같은 이유).
+    레거시 generateMatchingDashboardMessage도 BUSINESS_DATE 기준 30일 윈도우를
+    씀(services/main/src/telegram/generators.js:454) — 60일은 실서버 데이터
+    마이그레이션 이후 너무 길어 보인다는 사용자 신고로 30일에 맞춤(2026-09-26)."""
     return client.query(
         """SELECT s.SARANG_ID, smh.MATCH_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT,
                   TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE,
@@ -50,7 +53,7 @@ def _fetch_rows(client, team_id):
             WHERE mah.REGION_CODE = :1
               AND s.STAGE NOT IN ('유입', '티엠')
               AND s.DELETED_AT IS NULL
-              AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '60' DAY
+              AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY
             ORDER BY s.SARANG_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT
             FETCH FIRST 500 ROWS ONLY""",
         [team_id],
