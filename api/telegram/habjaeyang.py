@@ -15,10 +15,10 @@ logger = logging.getLogger('api.telegram.habjaeyang')
 
 HJ_SHORT = {'reply': 'r', 'window': 'w', 'approve': 'a', 'noop': 'n'}
 
-# 웹앱 반려 사유 버튼 그리드(스크린샷)와 동일한 라벨 — '잘못 누름'만 텔레그램 전용으로 맨 뒤에 추가.
+# 웹앱 반려 사유 버튼 그리드(스크린샷)와 동일한 라벨.
 # 콜백코드는 'x' + (인덱스+1) 한 글자 — sarang_id(32) 기준 callback_data가 Telegram의
 # 64바이트 한도에 거의 다 닿아서(코드 1글자짜리도 이미 63바이트) 여기서 더 늘릴 여유가 없음.
-HJ_REJECT_REASONS = ['매칭취소', '환경반려', '인성반려', '중섭반려', '답장안옴', '잘못올림', '잘못 누름']
+HJ_REJECT_REASONS = ['매칭취소', '환경반려', '인성반려', '중섭반려', '답장안옴', '잘못올림']
 
 
 def _hj_cb(secret, chat_id, sarang_id, code):
