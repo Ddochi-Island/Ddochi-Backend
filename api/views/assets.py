@@ -900,6 +900,17 @@ def edit_match(request, *args, **kwargs):
         except Exception:
             logging.getLogger('api.views.assets').warning('[edit_match] matching dashboard refresh failed', exc_info=True)
 
+    if edit_type in ('date', 'subGuide', 'gender', 'age', 'residence', 'phone'):
+        # 이 필드들은 찾기현황판 채팅방에 올라간 개별 합재양 카드 본문에도 그대로
+        # 나오는데(이름/성별/나이/연락처/거주지/매칭일시), 여기서 갱신 안 하면 카드는
+        # 수정 전 값으로 영영 고정되고 찾기현황판 목록(항상 최신 DB에서 다시 그림)만
+        # 최신값을 보여줘서 목록의 링크를 눌러도 옛날 카드가 뜨는 불일치가 생김
+        # (teacher는 카드 본문에 없는 필드라 제외 — 매칭현황판만 갱신하면 충분).
+        try:
+            send_habjaeyang_to_telegram(client, sarang_id, refresh_dashboard=False)
+        except Exception:
+            logging.getLogger('api.views.assets').warning('[edit_match] habjaeyang card refresh failed', exc_info=True)
+
     return JsonResponse({'success': True, 'message': '반영 완료!'})
 
 
