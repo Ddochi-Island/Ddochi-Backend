@@ -101,6 +101,25 @@ def _fetch_approvals(client, region_code, date_str):
     )
 
 
+def _fetch_habjaeyang_submissions(client, region_code, date_str):
+    """오늘 합재양 제출된 건 — _fetch_approvals와 동일 패턴(사람당 하루 한 번만 셈,
+    같은 날 여러 번 수정 제출해도 중복 집계 안 되게 최신 것 기준)."""
+    return client.query(
+        """SELECT RECRUITMENT_TYPE, DISTRICT_CODE FROM (
+             SELECT s.RECRUITMENT_TYPE, mah.DISTRICT_CODE,
+                    ROW_NUMBER() OVER (PARTITION BY s.SARANG_ID ORDER BY al.CREATED_AT DESC) AS RN
+               FROM SARANG_ACTIVITY_LOGS al
+               JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
+               JOIN MEMBER_AFFILIATION_HISTORIES mah
+                 ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+              WHERE al.EVENT_TYPE = '합재양작성'
+                AND mah.REGION_CODE = :1
+                AND TRUNC(al.CREATED_AT) = TO_DATE(:2, 'YYYY-MM-DD')
+           ) WHERE RN = 1""",
+        [region_code, date_str],
+    )
+
+
 def _fetch_offline_search(client, region_code, date_str):
     """오늘의 오프번찾 — 사쉐/번호찾 경로(SARANG_INFLOW_DETAILS 존재)로 들어온 오늘 유입."""
     return client.query(
@@ -127,19 +146,19 @@ def _promo_items(promo_list_str):
     return [seg.strip() for seg in promo_list_str.split(',') if seg.strip()]
 
 
-def _build_text(region_code, date_str, reports, approvals, offline_search, districts, leaders, goals):
+def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_submissions, districts, leaders, goals):
     now = datetime.datetime.now()
 
     # ── 집계 ────────────────────────────────────────────────────
     by_district = {dc: {
-        'off_act': 0, 'talk': 0, 'shed_reg': 0, 'appr_off': 0,
-        'promo': 0, 'dm': 0, 'intake': 0, 'appr_on': 0,
+        'off_act': 0, 'talk': 0, 'shed_reg': 0, 'appr_off': 0, 'hjy_off': 0,
+        'promo': 0, 'dm': 0, 'intake': 0, 'appr_on': 0, 'hjy_on': 0,
     } for dc in districts}
 
     def _slot(dc):
         return by_district.setdefault(dc, {
-            'off_act': 0, 'talk': 0, 'shed_reg': 0, 'appr_off': 0,
-            'promo': 0, 'dm': 0, 'intake': 0, 'appr_on': 0,
+            'off_act': 0, 'talk': 0, 'shed_reg': 0, 'appr_off': 0, 'hjy_off': 0,
+            'promo': 0, 'dm': 0, 'intake': 0, 'appr_on': 0, 'hjy_on': 0,
         })
 
     talk = dm = qr = promo_cnt = 0
@@ -182,6 +201,14 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, distr
         dc = r['district_code'] or '-'
         _slot(dc)['shed_reg'] += 1
         shed_regs.append(f"{r['pi_name'] or ''}/{r['introducer_name'] or ''}")
+
+    for h in hjy_submissions:
+        dc = h['district_code'] or '-'
+        slot = _slot(dc)
+        if h['recruitment_type'] == 'OFFLINE':
+            slot['hjy_off'] += 1
+        else:
+            slot['hjy_on'] += 1
 
     unreported = [ld['name'] for ld in leaders if ld['name'] not in reported_names]
 
@@ -243,12 +270,12 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, distr
     lines.append('---------------------------')
     lines.append('')
     lines.append('[오프라인]')
-    off_rows = ['구역|활동|말겂|번찾|재가']
-    on_rows = ['구역|홍보|디엠|유입|재가']
+    off_rows = ['구역|활동|말겂|번찾|재가|합재']
+    on_rows = ['구역|홍보|디엠|유입|재가|합재']
     for dc in sorted(by_district.keys()):
         s = by_district[dc]
-        off_rows.append(_table_row(dc, [s['off_act'], s['talk'], s['shed_reg'], s['appr_off']]))
-        on_rows.append(_table_row(dc, [s['promo'], s['dm'], s['intake'], s['appr_on']]))
+        off_rows.append(_table_row(dc, [s['off_act'], s['talk'], s['shed_reg'], s['appr_off'], s['hjy_off']]))
+        on_rows.append(_table_row(dc, [s['promo'], s['dm'], s['intake'], s['appr_on'], s['hjy_on']]))
     lines.append('<code>' + '\n'.join(off_rows) + '</code>')
     lines.append('')
     lines.append('[온라인]')
@@ -273,8 +300,9 @@ def _build_message(client, region_code, date_str):
     reports = _fetch_daily_reports(client, region_code, date_str)
     approvals = _fetch_approvals(client, region_code, date_str)
     offline_search = _fetch_offline_search(client, region_code, date_str)
+    hjy_submissions = _fetch_habjaeyang_submissions(client, region_code, date_str)
     goals = load_team_goal_total(client, region_code)
-    return _build_text(region_code, date_str, reports, approvals, offline_search, districts, leaders, goals)
+    return _build_text(region_code, date_str, reports, approvals, offline_search, hjy_submissions, districts, leaders, goals)
 
 
 def refresh_team_stats_for_sarang(client, sarang_id, date_str=None):
