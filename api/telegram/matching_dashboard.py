@@ -18,6 +18,12 @@ _WEEK = ['일', '월', '화', '수', '목', '금', '토']
 _MATCH_RESULT_ICON = {'CANCEL': '❌', 'DELAY': '❌', 'UNFIT': '⭕️', 'DROPOUT': '⭕️', 'SECOND_MEET': '⭕️', 'CONSULT_WIN': '⭕️'}
 _RESCHEDULE_RESULTS = ('DELAY', 'SECOND_MEET')
 
+# 수지역장/전도교관용 "전체 지역" 통합 매칭현황판 — 135 연합/246 연합과 같은 방식의
+# 특수 TEAM_ID(BROADCAST_SETTINGS.TEAM_ID='수지역', matchingChatId로 페어링).
+# 2026-09-27 사용자 요청. 크론 순회(list_prospect_chat_team_ids)는 코드 변경
+# 없이 이 TEAM_ID도 그대로 돌게 됨 — matchingChatId만 있으면 되는 구조라서.
+_ALL_REGIONS_TEAM_ID = '수지역'
+
 
 def _fmt_md(date_str):
     if not date_str:
@@ -32,14 +38,22 @@ def _fetch_rows(client, team_id):
     사람당 전체 이력이 필요함(get_assets의 match_by_id 2-pass와 같은 이유).
     레거시 generateMatchingDashboardMessage도 BUSINESS_DATE 기준 30일 윈도우를
     씀(services/main/src/telegram/generators.js:454) — 60일은 실서버 데이터
-    마이그레이션 이후 너무 길어 보인다는 사용자 신고로 30일에 맞춤(2026-09-26)."""
+    마이그레이션 이후 너무 길어 보인다는 사용자 신고로 30일에 맞춤(2026-09-26).
+    team_id가 _ALL_REGIONS_TEAM_ID면 REGION_CODE 필터 없이 전 지역을 가져옴 —
+    대신 6개 지역치를 다 합치면 글자수 제한(4000자)에 걸려서 통째로 잘리길래
+    (실제 겪음, 271건→중간에 잘림) 기간을 30일→3일로 좁힘(사용자 요청, 2026-09-27)."""
+    is_all = team_id == _ALL_REGIONS_TEAM_ID
+    region_clause = '' if is_all else 'AND mah.REGION_CODE = :1'
+    args = [] if is_all else [team_id]
+    window_days = 3 if is_all else 30
     return client.query(
-        """SELECT s.SARANG_ID, smh.MATCH_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT,
+        f"""SELECT s.SARANG_ID, smh.MATCH_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT,
                   TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(smh.MATCHED_AT, 'HH24:MI') AS MT_TIME,
                   smh.RESULT, mrc.LABEL AS RESULT_LABEL, msrc.LABEL AS SUB_REASON_LABEL,
                   spi.NAME AS PI_NAME, gm.NAME AS GUIDE_NAME,
-                  COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME
+                  COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME,
+                  mah.REGION_CODE AS REGION
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN SARANG_MATCH_HISTORIES smh ON smh.SARANG_ID = s.SARANG_ID
@@ -50,13 +64,13 @@ def _fetch_rows(client, team_id):
              LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
              JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-            WHERE mah.REGION_CODE = :1
-              AND s.STAGE NOT IN ('유입', '티엠')
+            WHERE s.STAGE NOT IN ('유입', '티엠')
+              {region_clause}
               AND s.DELETED_AT IS NULL
-              AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY
+              AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '{window_days}' DAY
             ORDER BY s.SARANG_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT
-            FETCH FIRST 500 ROWS ONLY""",
-        [team_id],
+            FETCH FIRST 2000 ROWS ONLY""",
+        args,
     )
 
 
@@ -77,6 +91,7 @@ def _build_text(team_id, rows):
     # 2026-09-27). 아직 결과 없는(미정/예정) 시도는 그대로 계속 보임.
     today = datetime.date.today()
     two_days_ago = today - datetime.timedelta(days=2)
+    is_all = team_id == _ALL_REGIONS_TEAM_ID
 
     by_sarang = {}
     for r in rows:
@@ -96,9 +111,11 @@ def _build_text(team_id, rows):
                 'time': (r['mt_time'] or '-') + ('✌️' if is_2cha else ''),
                 'name': r['pi_name'] or '', 'guide': r['guide_name'] or '',
                 'teacher': r['teacher_name'] or '', 'outcome': _outcome(r, nxt),
+                'region': r['region'] or '-',
             })
 
-    lines = ['➖➖➖➖➖➖➖➖➖➖', f'📢 {team_id}지역 매칭 현황판', '']
+    title = '📢 수지역 매칭 현황판' if is_all else f'📢 {team_id}지역 매칭 현황판'
+    lines = ['➖➖➖➖➖➖➖➖➖➖', title, '']
     if not groups:
         lines.append('예정된 매칭이 없어 😶')
     else:
@@ -109,7 +126,9 @@ def _build_text(team_id, rows):
             lines.append(f"◾️ {_fmt_md(key)}" if key != '미정' else '◾️ 날짜 미정')
             items = sorted(groups[key], key=lambda it: it['time'])
             for it in items:
-                lines.append(f"<code>{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
+                # 전체(수지역) 보드만 지역 태그를 맨 앞에 붙임 — 개별 지역 보드는 기존 그대로.
+                region_prefix = f"{it['region']}지역|" if is_all else ''
+                lines.append(f"<code>{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
             lines.append('')
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')
