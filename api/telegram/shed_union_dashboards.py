@@ -9,6 +9,8 @@
 import datetime
 import logging
 
+from django.utils import timezone
+
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
 from api.telegram.team_config import load_all_team_configs, load_team_config
@@ -140,7 +142,7 @@ def _build_unified_text(group, title, rows, region_chat_map=None):
     통합현황판 자체의 채팅방이 아니라 그 사람 소속 지역의 찾기현황판 채팅방에
     올라가 있어서, 딥링크는 반드시 그 지역 chat_id로 만들어야 함(통합현황판이 다른
     채팅방에 연결돼 있으면 메시지 ID가 그 방 기준으로는 의미가 없음)."""
-    now = datetime.datetime.now()
+    now = timezone.localtime()
     today = now.date()
     two_days_ago = today - datetime.timedelta(days=2)
     region_chat_map = region_chat_map or {}
@@ -304,7 +306,7 @@ _RESULT_ORDER = ('NO_ANSWER', 'RESERVED_TM', 'MEET_FIX', 'UNFIT', 'REJECT', 'INV
 
 
 def _build_tm_text(group, label, regs, logs, approvals):
-    now = datetime.datetime.now()
+    now = timezone.localtime()
     # 성사 = 만남픽스만이 아니라 전화가 연결돼서 뭐든 진행된 시도(부재중만 제외).
     success_count = sum(1 for l in logs if l['result'] != 'NO_ANSWER')
 
@@ -390,7 +392,7 @@ def _build_tm_text(group, label, regs, logs, approvals):
 
 def _build_message_tm(client, group):
     regions = _union_regions(client, group)
-    date_str = datetime.date.today().isoformat()
+    date_str = timezone.localdate().isoformat()
     regs = _fetch_tm_registrations(client, regions, date_str)
     logs = _fetch_tm_logs(client, regions, date_str)
     approvals = _fetch_tm_approvals(client, regions, date_str)
@@ -485,7 +487,7 @@ def _fetch_pending_count(client, regions):
 
 
 def _build_sched_text(group, label, rows, pending_count):
-    now = datetime.datetime.now()
+    now = timezone.localtime()
     today = now.date().isoformat()
 
     by_date = {}

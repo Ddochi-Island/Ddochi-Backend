@@ -3,7 +3,6 @@
 # 남겨서 하루치 마지막 기록을 보존한다(레거시의 22시 업무일 마감 스냅샷 보존과
 # 같은 취지 — 이 프로젝트엔 업무일 개념이 없어 캘린더 날짜(자정, KST) 기준으로
 # 단순화). 같은 날 안에서는 지금까지처럼 매시 삭제+재발송.
-import datetime
 import logging
 
 from django.utils import timezone
@@ -26,7 +25,7 @@ def in_broadcast_window(start_hour=6, end_hour=23):
 
 def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, msg_id_field, msg_date_field, log_tag):
     """cfg는 호출부가 이미 조회해둔 team config — chat_id/이전 메시지 정보 재사용."""
-    today = datetime.date.today().isoformat()
+    today = timezone.localdate().isoformat()
     try:
         result = tel_router_client.enqueue(
             'sendMessage', {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': reply_markup}, await_result=True,

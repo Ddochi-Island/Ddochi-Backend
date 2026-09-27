@@ -7,6 +7,8 @@
 import datetime
 import logging
 
+from django.utils import timezone
+
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
 from api.telegram.matching_dashboard import _ALL_REGIONS_TEAM_ID
@@ -67,7 +69,7 @@ def _display_date(r, today):
 
 
 def _build_text(team_id, rows, chat_id):
-    now = datetime.datetime.now()
+    now = timezone.localtime()
     today = now.date()
     two_days_ago = today - datetime.timedelta(days=2)
 
