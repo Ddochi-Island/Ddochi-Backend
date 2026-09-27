@@ -22,4 +22,7 @@ MAIN_INTERNAL_TELEGRAM_TOKEN = os.getenv('MAIN_INTERNAL_TELEGRAM_TOKEN', '')
 
 # L3 — 인라인 버튼 callback_data HMAC. main의 TG_CALLBACK_HMAC_SECRET과 동일해야 함.
 CALLBACK_HMAC_SECRET = os.getenv('TG_CALLBACK_HMAC_SECRET', '')
-CALLBACK_TS_WINDOW_MS = int(os.getenv('TG_CALLBACK_TS_WINDOW_MS', '600000'))
+# 카드 자체는 정각 크론(1시간 주기)/이벤트 때만 재생성되는데 기본값 10분은 그
+# 사이 텀보다 훨씬 짧아서 며칠 지난 카드는 거의 항상 "만료된 버튼"으로 뜸
+# (2026-09-27 실사용자 신고 — 25일에 뜬 카드를 27일에 눌렀더니 만료됨). 7일로 늘림.
+CALLBACK_TS_WINDOW_MS = int(os.getenv('TG_CALLBACK_TS_WINDOW_MS', str(7 * 24 * 3600_000)))
