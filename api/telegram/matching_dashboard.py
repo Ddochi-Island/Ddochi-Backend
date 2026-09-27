@@ -99,7 +99,8 @@ def _outcome(row, next_row):
 def _build_text(team_id, rows):
     # 결과 난(RESULT IS NOT NULL) 시도는 그 날짜로부터 2일 지나면 목록에서 뺌 —
     # prospect_dashboard.py의 "재가 후 2일 지난 건 제거"와 동일 패턴(사용자 요청,
-    # 2026-09-27). 아직 결과 없는(미정/예정) 시도는 그대로 계속 보임.
+    # 2026-09-27 — 처음엔 "지나면 바로"로 바꿨다가 유예 2일 유지로 재확정).
+    # 아직 결과 없는(미정/예정) 시도는 그대로 계속 보임.
     today = datetime.date.today()
     two_days_ago = today - datetime.timedelta(days=2)
     is_all = team_id == _ALL_REGIONS_TEAM_ID
