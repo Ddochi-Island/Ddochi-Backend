@@ -61,6 +61,15 @@ def _trunc(s, max_bytes):
     return b[:max_bytes].decode('utf-8', errors='ignore')
 
 
+def _resolve_route_tool(path, tool):
+    # 레거시 PATH가 'shed_1'~'shed_6'(shed 자동이관 SOURCE_LINK 코드)면 사람이 읽을
+    # 경로/도구가 아니라 내부 라우팅 번호라 그대로 노출하면 안 됨 — 전부 "도구노방(사쉐)"로
+    # 통일(2026-09-26 사용자 확인, shed_N 전부 동일 처리).
+    if path and path.startswith('shed_'):
+        return '도구노방', '사쉐'
+    return path, tool
+
+
 def _derive_stage(status, tm_status, has_active_hjy, approval_status, latest_outcome):
     if status == 'phoneSearch':
         return '유입' if tm_status in (None, 'before') else '티엠'
@@ -291,6 +300,7 @@ class Command(BaseCommand):
                 teacher_name_override = p['teacher_name'] if not p['teacher_sabun'] else None
 
                 hjy_id = uuid.uuid4().hex.upper()
+                route_val, tool_val = _resolve_route_tool(p['path'], p['tool'])
                 dev.exec(
                     'INSERT INTO SARANG_HAB_JAE_YANG ('
                     'HAB_JAE_YANG_ID, SARANG_ID, IS_ACTIVE, GUIDE_MEMBER_ID, CALLER_MEMBER_ID, TEACHER_MEMBER_ID, '
@@ -302,7 +312,7 @@ class Command(BaseCommand):
                     f') VALUES (:1,:2,:3,:4,:5,:6,:7,:8,{_tsx(9)},:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,:21,:22,:23,:24,:25,:26,:27,:28,:29,:30,:31,:32,{_tsx(33)})',
                     [
                         hjy_id, sarang_id, 1, guide, hjy['tm_user_sabun'], p['teacher_sabun'],
-                        _trunc(p['path'], 50), _trunc(p['tool'], 50), _ts(meeting['scheduled_at']) if meeting else None,
+                        _trunc(route_val, 50), _trunc(tool_val, 50), _ts(meeting['scheduled_at']) if meeting else None,
                         _trunc(meeting['place'], 100) if meeting else None,
                         hjy['gwacheon_min'], hjy['gwacheon_transfer'], hjy['center_min'], hjy['center_transfer'],
                         _trunc(hjy['job'], 100), _trunc(hjy['schedule_text'], 100), _trunc(hjy['purpose'], 255),
