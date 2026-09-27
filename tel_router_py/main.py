@@ -1,4 +1,4 @@
-# tel_router 파이썬 최소 버전 — 텔레그램 웹훅 수신(/pair, 인라인 버튼 callback_query 처리) + main→발송 큐(/enqueue)
+# tel_router 파이썬 최소 버전 — 텔레그램 웹훅 수신(/pair, /t_(교사입력), 인라인 버튼 callback_query 처리) + main→발송 큐(/enqueue)
 # ponytail: 대시보드 SPA/멀티봇/공유 리드 명령은 뺐음. 필요해지면 추가.
 import asyncio
 import logging
@@ -9,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 import callback
 import config
 import pairing
+import teacher_input
 import telegram_client
 
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +71,13 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str = Heade
         except Exception:
             logger.exception('pair handling failed')
             raise HTTPException(status_code=500, detail='pair_failed')
+        return {'ok': True}
+
+    if isinstance(text, str) and teacher_input.is_teacher_command(text):
+        try:
+            await teacher_input.handle_teacher_message(_http_client, message)
+        except Exception:
+            logger.exception('teacher command handling failed')
         return {'ok': True}
 
     cq = update.get('callback_query')

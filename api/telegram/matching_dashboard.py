@@ -131,7 +131,7 @@ def _build_text(team_id, rows):
                 'time': (r['mt_time'] or '-') + ('✌️' if is_2cha else ''),
                 'name': r['pi_name'] or '', 'guide': r['guide_name'] or '',
                 'teacher': r['teacher_name'] or '', 'outcome': _outcome(r, nxt),
-                'region': r['region'] or '-',
+                'region': r['region'] or '-', 'sarang_id': r['sarang_id'],
             })
 
     title = '📢 수지역 매칭 현황판' if is_all else f'📢 {team_id}지역 매칭 현황판'
@@ -149,6 +149,11 @@ def _build_text(team_id, rows):
                 # 전체(수지역) 보드만 지역 태그를 맨 앞에 붙임 — 개별 지역 보드는 기존 그대로.
                 region_prefix = f"{it['region']}지역|" if is_all else ''
                 lines.append(f"<code>{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
+                # 교사 미배정 + 아직 결과 없는 건만 탭형 명령 노출(개별 지역 보드 한정, 수지역
+                # 통합 보드는 대상 아님) — 8자리 서픽스라 <code> 밖 평문으로 둬야 텔레그램이
+                # bot_command로 인식해서 탭하면 입력창에 자동완성됨(32자 넘으면 인식 안 됨).
+                if not is_all and not it['teacher'] and not it['outcome']:
+                    lines.append(f"　　└ 교사 입력: /t_{it['sarang_id'][-8:]} 이름")
             lines.append('')
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')

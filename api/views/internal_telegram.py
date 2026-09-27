@@ -13,7 +13,7 @@ from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
-from api.views.assets import _set_habjaeyang_approval, _toggle_hj_field
+from api.views.assets import _member_id_by_name, _set_habjaeyang_approval, _toggle_hj_field
 
 HJ_SHORT = {'r': 'reply', 'w': 'window', 'a': 'approve', 'n': 'noop'}
 
@@ -132,6 +132,67 @@ def _handle_hj(client, args, chat_id, message_id, telegram_id):
         return {'toast': '🎉 재가 완료!'}
 
     return {'toast': '⚠️ 알 수 없는 동작'}
+
+
+def _assign_teacher(client, short_code, raw_teacher):
+    # 매칭현황판 각 행의 '/t_<sarang_id 뒤 8자리>' 탭형 명령 처리 — edit_match(웹, type=teacher)의
+    # 이름 파싱 규칙과 동일하게 맞춤(assets.py:821). 8자리만 씀 — 32자 전체는 텔레그램의
+    # bot_command 엔티티 인식 길이 한도(32자)를 넘어서 탭이 안 먹힘.
+    row = client.query_one(
+        """SELECT s.SARANG_ID, spi.NAME, hj.HAB_JAE_YANG_ID
+             FROM SARANG s
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN SARANG_HAB_JAE_YANG hj   ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+            WHERE UPPER(SUBSTR(s.SARANG_ID, -8)) = UPPER(:1)
+              AND s.DELETED_AT IS NULL""",
+        [short_code],
+    )
+    if not row:
+        return {'ok': False, 'message': '⚠️ 대상을 찾을 수 없어(이미 지나갔거나 잘못된 링크일 수 있어)'}
+
+    raw = str(raw_teacher or '').strip()
+    is_other_region = raw.endswith('(타지역)')
+    teacher_name = raw[:-5].strip() if is_other_region else raw.split('(')[0].strip()
+    if not teacher_name:
+        return {'ok': False, 'message': '⚠️ 교사 이름이 비어있어'}
+
+    teacher_id, override = None, None
+    if is_other_region:
+        override = raw
+    else:
+        teacher_id = _member_id_by_name(client, teacher_name)
+        if not teacher_id:
+            return {'ok': False, 'message': f'⚠️ [{teacher_name}] 명단에 없어! 타지역이면 뒤에 "(타지역)"을 붙여줘'}
+
+    client.exec(
+        "UPDATE SARANG_HAB_JAE_YANG SET TEACHER_MEMBER_ID = :1, TEACHER_NAME_OVERRIDE = :2 WHERE HAB_JAE_YANG_ID = :3",
+        [teacher_id, override, row['hab_jae_yang_id']],
+    )
+    try:
+        refresh_matching_dashboard_for_sarang(client, row['sarang_id'])
+    except Exception:
+        logging.getLogger('api.views.internal_telegram').warning(
+            '[assign_teacher] matching dashboard refresh failed', exc_info=True,
+        )
+    return {'ok': True, 'message': f"✅ {row['name']} — 교사 [{teacher_name}] 입력 완료!"}
+
+
+@csrf_exempt
+def telegram_teacher_assign(request, *args, **kwargs):
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+
+    body = _json_body(request)
+    short_code = str(body.get('shortCode') or '').strip()
+    teacher_name = str(body.get('teacherName') or '')
+    if not short_code:
+        return JsonResponse({'ok': False, 'message': '⚠️ 잘못된 요청'})
+
+    client = DataRouterClient()
+    result = _assign_teacher(client, short_code, teacher_name)
+    return JsonResponse(result)
 
 
 @csrf_exempt

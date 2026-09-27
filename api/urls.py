@@ -251,6 +251,7 @@ internal_urlpatterns = [
     path('telegram/claim-shared-lead', shared_leads_claim.telegram_claim_shared_lead, name='shared_leads_claim_telegram_claim_shared_lead'),
     path('sheet-sync', sheet_sync.sheet_sync, name='sheet_sync_sheet_sync'),
     path('telegram/callback', internal_telegram.telegram_callback, name='internal_telegram_telegram_callback'),
+    path('telegram/teacher-assign', internal_telegram.telegram_teacher_assign, name='internal_telegram_teacher_assign'),
 ]
 
 internal_cron_urlpatterns = [
