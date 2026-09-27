@@ -9,6 +9,7 @@ import logging
 
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
+from api.telegram.matching_dashboard import _ALL_REGIONS_TEAM_ID
 from api.telegram.team_config import load_team_config, patch_team_config
 
 logger = logging.getLogger('api.telegram.prospect_dashboard')
@@ -145,6 +146,8 @@ def refresh_prospect_dashboard(client, team_id, allow_create=True):
     없으면 조용히 skip(버튼 토글처럼 가벼운 이벤트에서 새 메시지를 만들지 않기 위함).
     06~23시 발송 시간대 밖이면 웹 이벤트로 인한 갱신도 건너뜀 — 그 시간대 메시지는
     전날 마감 기록이라 더 이상 안 건드림(정각 크론이 06시에 새로 시작)."""
+    if team_id == _ALL_REGIONS_TEAM_ID:
+        return {'skipped': True, 'reason': 'all_regions_matching_only'}
     if not in_broadcast_window():
         return {'skipped': True, 'reason': 'outside_broadcast_window'}
 
@@ -200,6 +203,9 @@ def send_fresh_prospect_dashboard(client, team_id):
     삭제하지만, 날짜가 바뀐 뒤 첫 발송이면 전날 마지막 메시지는 하루치 기록으로
     남겨두고 지우지 않음(dashboard_send.send_fresh_dashboard).
     (이벤트 훅용 refresh_prospect_dashboard는 같은 메시지를 계속 edit — 이건 매시 갱신용)"""
+    if team_id == _ALL_REGIONS_TEAM_ID:
+        return {'skipped': True, 'reason': 'all_regions_matching_only'}
+
     cfg = load_team_config(client, team_id)
     chat_id = cfg.get('prospectChatId') or cfg.get('matchingChatId')
     if not chat_id:

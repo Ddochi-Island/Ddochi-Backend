@@ -41,11 +41,12 @@ def _fetch_rows(client, team_id):
     마이그레이션 이후 너무 길어 보인다는 사용자 신고로 30일에 맞춤(2026-09-26).
     team_id가 _ALL_REGIONS_TEAM_ID면 REGION_CODE 필터 없이 전 지역을 가져옴 —
     대신 6개 지역치를 다 합치면 글자수 제한(4000자)에 걸려서 통째로 잘리길래
-    (실제 겪음, 271건→중간에 잘림) 만남 예정일(MATCHED_AT) 기준 오늘 ±3일에
-    해당하는 시도가 하나라도 있는 사람만으로 좁힘(사용자 요청, 2026-09-27) —
-    등록일(CREATED_AT) 기준이 아니라 만남 날짜 기준인 점 주의. 사람 단위로만
-    좁히고 그 사람의 전체 이력은 그대로 다 가져옴(밀림/2차만남 다음 날짜 계산에
-    prev/next가 필요해서) — 화면에 실제로 보일 범위 밖 시도 제외는 _build_text가 함."""
+    (실제 겪음, 271건→중간에 잘림) 만남 예정일(MATCHED_AT) 기준 오늘부터 3일
+    후까지(과거 제외, 사용자 요청 2026-09-27)에 해당하는 시도가 하나라도 있는
+    사람만으로 좁힘 — 등록일(CREATED_AT) 기준이 아니라 만남 날짜 기준인 점
+    주의. 사람 단위로만 좁히고 그 사람의 전체 이력은 그대로 다 가져옴(밀림/
+    2차만남 다음 날짜 계산에 prev/next가 필요해서) — 화면에 실제로 보일
+    범위 밖 시도 제외는 _build_text가 함."""
     is_all = team_id == _ALL_REGIONS_TEAM_ID
     region_clause = '' if is_all else 'AND mah.REGION_CODE = :1'
     args = [] if is_all else [team_id]
@@ -53,7 +54,7 @@ def _fetch_rows(client, team_id):
         scope_clause = """AND EXISTS (
               SELECT 1 FROM SARANG_MATCH_HISTORIES x
                WHERE x.SARANG_ID = s.SARANG_ID
-                 AND x.MATCHED_AT BETWEEN SYSTIMESTAMP - INTERVAL '3' DAY AND SYSTIMESTAMP + INTERVAL '3' DAY
+                 AND x.MATCHED_AT BETWEEN TRUNC(SYSDATE) AND TRUNC(SYSDATE) + INTERVAL '4' DAY
             )"""
     else:
         scope_clause = "AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY"
@@ -104,9 +105,10 @@ def _build_text(team_id, rows):
     today = datetime.date.today()
     two_days_ago = today - datetime.timedelta(days=2)
     is_all = team_id == _ALL_REGIONS_TEAM_ID
-    # 수지역(전체) 보드는 만남 예정일 기준 오늘 ±3일만 화면에 보임 — _fetch_rows는
-    # 사람 단위로만 넓게 가져오므로(prev/next 계산용) 실제 표시 범위는 여기서 자름.
-    window_start = today - datetime.timedelta(days=3)
+    # 수지역(전체) 보드는 만남 예정일 기준 오늘부터 3일 후까지(과거는 제외)만
+    # 화면에 보임 — _fetch_rows는 사람 단위로만 넓게 가져오므로(prev/next 계산용)
+    # 실제 표시 범위는 여기서 자름.
+    window_start = today
     window_end = today + datetime.timedelta(days=3)
 
     by_sarang = {}
