@@ -5,6 +5,8 @@
 import datetime
 import logging
 
+from django.utils import timezone
+
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
 from api.telegram.team_config import load_team_config, patch_team_config
@@ -102,7 +104,7 @@ def _build_text(team_id, rows):
     # prospect_dashboard.py의 "재가 후 2일 지난 건 제거"와 동일 패턴(사용자 요청,
     # 2026-09-27 — 처음엔 "지나면 바로"로 바꿨다가 유예 2일 유지로 재확정).
     # 아직 결과 없는(미정/예정) 시도는 그대로 계속 보임.
-    today = datetime.date.today()
+    today = timezone.localdate()
     two_days_ago = today - datetime.timedelta(days=2)
     is_all = team_id == _ALL_REGIONS_TEAM_ID
     # 수지역(전체) 보드는 만남 예정일 기준 오늘부터 3일 후까지(과거는 제외)만

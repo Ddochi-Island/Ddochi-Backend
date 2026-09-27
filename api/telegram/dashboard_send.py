@@ -6,6 +6,8 @@
 import datetime
 import logging
 
+from django.utils import timezone
+
 from api.telegram import tel_router_client
 from api.telegram.team_config import patch_team_config
 
@@ -13,9 +15,13 @@ logger = logging.getLogger('api.telegram.dashboard_send')
 
 
 def in_broadcast_window(start_hour=6, end_hour=23):
-    """정각 발송 시간대(06~23시) 밖이면 웹 이벤트로 인한 edit도 건너뜀 — 그 시간대
-    바깥에 떠 있는 메시지는 전날의 마감 기록이라 더 이상 손대지 않기 위함."""
-    return start_hour <= datetime.datetime.now().hour <= end_hour
+    """정각 발송 시간대(06~23시, KST) 밖이면 웹 이벤트로 인한 edit도 건너뜀 — 그 시간대
+    바깥에 떠 있는 메시지는 전날의 마감 기록이라 더 이상 손대지 않기 위함.
+    배포 컨테이너 OS 시간대가 UTC라(python:3.12-slim 기본값, TZ 환경변수 미설정)
+    datetime.datetime.now()를 쓰면 06~23시 판정이 실제로는 UTC 기준으로 적용돼서
+    의도한 KST 06~23시와 어긋나 있었음(2026-09-27 발견) — settings.TIME_ZONE=
+    'Asia/Seoul'을 실제로 반영하는 django.utils.timezone 경유로 고침."""
+    return start_hour <= timezone.localtime().hour <= end_hour
 
 
 def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, msg_id_field, msg_date_field, log_tag):
