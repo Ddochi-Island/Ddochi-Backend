@@ -8,7 +8,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from api.clients.data_router import DataRouterClient
-from api.telegram.habjaeyang import refresh_hj_markup
+from api.telegram.habjaeyang import HJ_REJECT_REASONS, refresh_hj_markup, refresh_hj_reason_markup
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
@@ -40,9 +40,40 @@ def _resolve_actor(client, telegram_id, sarang_id):
 
 def _handle_hj(client, args, chat_id, message_id, telegram_id):
     sarang_id, _, code = str(args or '').rpartition('.')
-    action = HJ_SHORT.get(code, code)
     if not sarang_id:
         return {'toast': '⚠️'}
+
+    if code == 'x':
+        refresh_hj_reason_markup(client, sarang_id, chat_id, message_id)
+        return {'toast': '사유를 선택해줘'}
+
+    if code == 'b':
+        refresh_hj_markup(client, sarang_id, chat_id, message_id)
+        return {'toast': None}
+
+    if code[:1] == 'x' and code[1:].isdigit():
+        reason_idx = int(code[1:])
+        if not (1 <= reason_idx <= len(HJ_REJECT_REASONS)):
+            return {'toast': '⚠️ 알 수 없는 사유'}
+        reason = HJ_REJECT_REASONS[reason_idx - 1]
+        actor = _resolve_actor(client, telegram_id, sarang_id)
+        if not actor:
+            return {'toast': '⚠️ 처리 실패'}
+        result = _set_habjaeyang_approval(client, sarang_id, actor, 'rejected', reason=reason)
+        if result is None:
+            return {'toast': '⚠️ 합재양 없음'}
+        refresh_hj_markup(client, sarang_id, chat_id, message_id)
+        group = shed_union_for_sarang(client, sarang_id)
+        if group:
+            try:
+                refresh_shed_unified(client, group)
+            except Exception:
+                logging.getLogger('api.views.internal_telegram').warning(
+                    '[handle_hj:reject] shed unified dashboard refresh failed', exc_info=True,
+                )
+        return {'toast': f'🚫 반려 처리 완료 ({reason})'}
+
+    action = HJ_SHORT.get(code, code)
 
     if action == 'noop':
         return {'toast': '🦔'}

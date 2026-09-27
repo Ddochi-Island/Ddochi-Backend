@@ -15,12 +15,21 @@ logger = logging.getLogger('api.telegram.habjaeyang')
 
 HJ_SHORT = {'reply': 'r', 'window': 'w', 'approve': 'a', 'noop': 'n'}
 
+# 웹앱 반려 사유 버튼 그리드(스크린샷)와 동일한 라벨 — '잘못 누름'만 텔레그램 전용으로 맨 뒤에 추가.
+# 콜백코드는 'x' + (인덱스+1) 한 글자 — sarang_id(32) 기준 callback_data가 Telegram의
+# 64바이트 한도에 거의 다 닿아서(코드 1글자짜리도 이미 63바이트) 여기서 더 늘릴 여유가 없음.
+HJ_REJECT_REASONS = ['매칭취소', '환경반려', '인성반려', '중섭반려', '답장안옴', '잘못올림', '잘못 누름']
+
+
+def _hj_cb(secret, chat_id, sarang_id, code):
+    if secret and chat_id is not None:
+        return sign_callback_data(secret, 'hj', f'{sarang_id}.{code}', chat_id)
+    return f'hj|{sarang_id}|{code}'
+
 
 def build_hj_keyboard(sarang_id, secret, chat_id, replied, window_opened, approval_status):
     def cb(code):
-        if secret and chat_id is not None:
-            return sign_callback_data(secret, 'hj', f'{sarang_id}.{code}', chat_id)
-        return f'hj|{sarang_id}|{code}'
+        return _hj_cb(secret, chat_id, sarang_id, code)
 
     rows = [[
         {'text': '✅ 답장 💬' if replied else '💬 답장', 'callback_data': cb(HJ_SHORT['reply'])},
@@ -31,10 +40,24 @@ def build_hj_keyboard(sarang_id, secret, chat_id, replied, window_opened, approv
         rows.append([{'text': '🎉 재가 완료', 'callback_data': cb(HJ_SHORT['noop'])}])
     elif approval_status == 'rejected':
         rows.append([{'text': '🚫 반려됨', 'callback_data': cb(HJ_SHORT['noop'])}])
-    elif replied and window_opened:
-        rows.append([{'text': '🛡️ 재가', 'callback_data': cb(HJ_SHORT['approve'])}])
+    else:
+        action_row = []
+        if replied and window_opened:
+            action_row.append({'text': '🛡️ 재가', 'callback_data': cb(HJ_SHORT['approve'])})
+        action_row.append({'text': '❌ 반려', 'callback_data': cb('x')})
+        rows.append(action_row)
 
-    rows.append([{'text': '❌ 반려하기 (웹앱)', 'url': 'https://page.ddochi.cloud/#/matching'}])
+    return {'inline_keyboard': rows}
+
+
+def build_hj_reason_keyboard(sarang_id, secret, chat_id):
+    """'❌ 반려' 클릭 직후 — 사유를 고를 수 있는 인라인 버튼(2열 그리드) + 뒤로가기."""
+    def cb(code):
+        return _hj_cb(secret, chat_id, sarang_id, code)
+
+    buttons = [{'text': r, 'callback_data': cb(f'x{i + 1}')} for i, r in enumerate(HJ_REJECT_REASONS)]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([{'text': '← 뒤로', 'callback_data': cb('b')}])
     return {'inline_keyboard': rows}
 
 
@@ -214,3 +237,14 @@ def refresh_hj_markup(client, sarang_id, chat_id, message_id):
         refresh_prospect_dashboard(client, row['team_id'], allow_create=False)
     except Exception:
         logger.warning('[habjaeyang] prospect dashboard refresh failed', exc_info=True)
+
+
+def refresh_hj_reason_markup(client, sarang_id, chat_id, message_id):
+    """'❌ 반려' 클릭 직후 — 같은 메시지의 버튼만 반려 사유 그리드로 교체."""
+    keyboard = build_hj_reason_keyboard(sarang_id, settings.TG_CALLBACK_HMAC_SECRET, chat_id)
+    try:
+        tel_router_client.enqueue(
+            'editMessageReplyMarkup', {'chat_id': chat_id, 'message_id': message_id, 'reply_markup': keyboard},
+        )
+    except Exception:
+        logger.warning('[habjaeyang] editMessageReplyMarkup(reason) failed', exc_info=True)
