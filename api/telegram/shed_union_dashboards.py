@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
+from api.telegram.prospect_dashboard import _display_date
 from api.telegram.team_config import load_all_team_configs, load_team_config
 
 logger = logging.getLogger('api.telegram.shed_union_dashboards')
@@ -99,7 +100,7 @@ def _fetch_unified_rows(client, regions):
                    hj.HAS_REPLIED, hj.IS_WINDOW_OPENED,
                    TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                    TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
-                   TO_CHAR(al.CREATED_AT, 'YYYY-MM-DD') AS FOUND_APPR_DATE
+                   TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE
               FROM SARANG s
               JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
               JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
@@ -107,11 +108,6 @@ def _fetch_unified_rows(client, regions):
               LEFT JOIN MEMBERS gm           ON gm.MEMBER_ID = hj.GUIDE_MEMBER_ID
               JOIN MEMBER_AFFILIATION_HISTORIES mah
                 ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-              LEFT JOIN (
-                SELECT SARANG_ID, CREATED_AT,
-                       ROW_NUMBER() OVER (PARTITION BY SARANG_ID ORDER BY CREATED_AT DESC) AS RN
-                  FROM SARANG_ACTIVITY_LOGS WHERE EVENT_TYPE = '재가처리'
-              ) al ON al.SARANG_ID = s.SARANG_ID AND al.RN = 1
              WHERE mah.REGION_CODE IN ({placeholders})
                AND s.STAGE IN ('합재양', '재가')
                AND hj.APPROVAL_STATUS != 'rejected'
@@ -121,13 +117,6 @@ def _fetch_unified_rows(client, regions):
              FETCH FIRST 200 ROWS ONLY""",
         values,
     )
-
-
-def _display_date(r, today):
-    if r['approval_status'] == 'approved':
-        found = r['found_appr_date']
-        return datetime.date.fromisoformat(found) if found else today
-    return datetime.date.fromisoformat(r['mt_date']) if r['mt_date'] else today
 
 
 def _region_tg_chat_part(chat_id):

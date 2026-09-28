@@ -24,18 +24,13 @@ def _fetch_rows(client, team_id):
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
-                  TO_CHAR(al.CREATED_AT, 'YYYY-MM-DD') AS FOUND_APPR_DATE
+                  TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN SARANG_HAB_JAE_YANG hj   ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
              LEFT JOIN MEMBERS gm          ON gm.MEMBER_ID = hj.GUIDE_MEMBER_ID
              JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-             LEFT JOIN (
-               SELECT SARANG_ID, CREATED_AT,
-                      ROW_NUMBER() OVER (PARTITION BY SARANG_ID ORDER BY CREATED_AT DESC) AS RN
-                 FROM SARANG_ACTIVITY_LOGS WHERE EVENT_TYPE = '재가처리'
-             ) al ON al.SARANG_ID = s.SARANG_ID AND al.RN = 1
             WHERE mah.REGION_CODE = :1
               AND s.STAGE IN ('합재양', '재가')
               AND hj.APPROVAL_STATUS != 'rejected'
@@ -58,14 +53,18 @@ def _fmt_md(date_str):
 
 
 def _display_date(r, today):
-    """그룹 위치를 정하는 날짜 — 재가된 건은 "재가된 날"에 고정(이후 만남 일정이 밀려도
-    그룹은 안 움직임). 재가일은 SARANG_ACTIVITY_LOGS의 '재가처리' 로그 시각에서 가져옴
-    (전용 컬럼 없이 기존 로그 재사용 — 재매칭으로 재가가 여러 번 나면 가장 최근 걸 씀).
-    재가 전(대기) 건은 만남 예정일 기준으로 그룹핑, 날짜 미정이면 오늘."""
-    if r['approval_status'] == 'approved':
-        found = r['found_appr_date']
-        return datetime.date.fromisoformat(found) if found else today
-    return datetime.date.fromisoformat(r['mt_date']) if r['mt_date'] else today
+    """그룹 위치(찾기 날짜) — 레거시 computeFoundApprovalDate/generateProspectDashboardMessage와 같은 공식:
+    등록일(영업일, 22시 이후 등록은 다음날)과 합재양 만남 예정일 차이가 3일 넘으면 "만남 3일 전",
+    아니면 등록일. 재가 여부와 무관하게 같은 날짜라 재가해도 그룹이 안 움직임 — 전엔 재가된 건을
+    '재가한 날'로 옮겨서 재가할 때마다 오늘 그룹으로 몰렸음(2026-09-28 6지역 신고). 재가 후엔
+    MATCH_SCHEDULED_AT이 안 바뀌어서(edit_match는 재가 뒤 SARANG_MATCH_HISTORIES만 고침) 레거시의
+    '재가 순간에 얼려두기'와 결과가 같음."""
+    biz = datetime.date.fromisoformat(r['biz_date']) if r['biz_date'] else today
+    if r['mt_date']:
+        mt = datetime.date.fromisoformat(r['mt_date'])
+        if (mt - biz).days > 3:
+            return mt - datetime.timedelta(days=3)
+    return biz
 
 
 def _build_text(team_id, rows, chat_id):
