@@ -78,16 +78,21 @@ def _ox(v):
 
 
 def _trunc(s, max_bytes):
-    # SARANG_HAB_JAE_YANG 등 일부 컬럼은 소스엔 "VARCHAR2(n CHAR)"로 돼있지만
-    # 실배포는 바이트 세맨틱스(CHAR_USED='B', 2026-09-25 마이그레이션 중 실측 확인) —
-    # 긴 한글 자유텍스트 입력 시 ORA-12899로 저장 자체가 실패하는 걸 실사용자가
-    # 실제로 겪음(합재양 "일정" 필드). 문자수 아니라 바이트 기준으로 잘라야 함.
+    # 바이트 세맨틱스(CHAR_USED='B') 컬럼용 — SARANG_HAB_JAE_YANG에선 ETC(255B)/QNA(1000B)만 해당.
+    # 한글은 3바이트라 문자수로 자르면 ORA-12899로 저장 자체가 실패함.
     if not s:
         return s
     b = s.encode('utf-8')
     if len(b) <= max_bytes:
         return s
     return b[:max_bytes].decode('utf-8', errors='ignore')
+
+
+def _trunc_chars(s, max_chars):
+    # 문자 세맨틱스(CHAR_USED='C', 'VARCHAR2(n CHAR)') 컬럼용 — 나머지 합재양 필드 전부. 여기에 바이트 기준
+    # _trunc를 쓰면 한글이 1/3 길이(100자→33자)로 잘려서 합재양 카드가 중간에 끊겼음(2026-09-29 실측:
+    # 9/25 이후 작성분 중 일정 11건, 내적이미지 18건 등이 잘림 — 9/25에 이 컬럼들이 바이트라고 잘못 판단함).
+    return s[:max_chars] if s else s
 
 
 def _member_id_by_name(client, name):
@@ -602,16 +607,16 @@ def submit_result(request, *args, **kwargs):
 
         hj_args_common = [
             guide_id, caller_id,
-            _trunc(str(hj.get('path') or '').strip() or None, 50), _trunc(str(hj.get('tool') or '').strip() or None, 50),
+            _trunc_chars(str(hj.get('path') or '').strip() or None, 50), _trunc_chars(str(hj.get('tool') or '').strip() or None, 50),
             _ox(hj.get('verbalManFix')),
-            mt_datetime, mt_datetime, _trunc(str(hj.get('mtPlace') or '').strip() or None, 100),
+            mt_datetime, mt_datetime, _trunc_chars(str(hj.get('mtPlace') or '').strip() or None, 100),
             _parse_min_label(hj.get('gwacheonMin')), _parse_transfer_label(hj.get('gwacheonTransfer')),
             _parse_min_label(hj.get('centerMin')), _parse_transfer_label(hj.get('centerTransfer')),
-            _trunc(str(hj.get('job') or '').strip() or None, 100), _trunc(str(hj.get('sch') or '').strip() or None, 100),
-            _trunc(str(hj.get('plan') or '').strip() or None, 255), _trunc(str(hj.get('purpose') or '').strip() or None, 255),
-            _trunc(str(hj.get('selfImage') or '').strip() or None, 255), _trunc(str(hj.get('trouble') or '').strip() or None, 255),
-            _trunc(str(hj.get('att') or '').strip() or None, 255), _trunc(str(hj.get('wary') or '').strip() or None, 255),
-            _trunc(str(hj.get('dist') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('job') or '').strip() or None, 100), _trunc_chars(str(hj.get('sch') or '').strip() or None, 100),
+            _trunc_chars(str(hj.get('plan') or '').strip() or None, 255), _trunc_chars(str(hj.get('purpose') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('selfImage') or '').strip() or None, 255), _trunc_chars(str(hj.get('trouble') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('att') or '').strip() or None, 255), _trunc_chars(str(hj.get('wary') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('dist') or '').strip() or None, 255),
             _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc(str(hj.get('etc') or '').strip() or None, 255),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ]
@@ -1176,15 +1181,15 @@ def submit_habjaeyang_new(request, *args, **kwargs):
                           :19, :20, :21, :22, :23,
                           :24, :25, :26, :27, :28)""",
         'args': [
-            uuid.uuid4().hex.upper(), sarang_id, guide_id, caller_id, _trunc(path_val, 50), _trunc(tool_val, 50), _ox(hj.get('verbalManFix')),
-            mt_datetime, mt_datetime, _trunc(str(hj.get('mtPlace') or '').strip() or None, 100),
+            uuid.uuid4().hex.upper(), sarang_id, guide_id, caller_id, _trunc_chars(path_val, 50), _trunc_chars(tool_val, 50), _ox(hj.get('verbalManFix')),
+            mt_datetime, mt_datetime, _trunc_chars(str(hj.get('mtPlace') or '').strip() or None, 100),
             _parse_min_label(hj.get('gwacheonMin')), _parse_transfer_label(hj.get('gwacheonTransfer')),
             _parse_min_label(hj.get('centerMin')), _parse_transfer_label(hj.get('centerTransfer')),
-            _trunc(str(hj.get('job') or '').strip() or None, 100), _trunc(str(hj.get('sch') or '').strip() or None, 100),
-            _trunc(str(hj.get('plan') or '').strip() or None, 255), _trunc(str(hj.get('purpose') or '').strip() or None, 255),
-            _trunc(str(hj.get('selfImage') or '').strip() or None, 255), _trunc(str(hj.get('trouble') or '').strip() or None, 255),
-            _trunc(str(hj.get('att') or '').strip() or None, 255), _trunc(str(hj.get('wary') or '').strip() or None, 255),
-            _trunc(str(hj.get('dist') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('job') or '').strip() or None, 100), _trunc_chars(str(hj.get('sch') or '').strip() or None, 100),
+            _trunc_chars(str(hj.get('plan') or '').strip() or None, 255), _trunc_chars(str(hj.get('purpose') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('selfImage') or '').strip() or None, 255), _trunc_chars(str(hj.get('trouble') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('att') or '').strip() or None, 255), _trunc_chars(str(hj.get('wary') or '').strip() or None, 255),
+            _trunc_chars(str(hj.get('dist') or '').strip() or None, 255),
             _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc(str(hj.get('etc') or '').strip() or None, 255),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ],

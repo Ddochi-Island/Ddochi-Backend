@@ -156,3 +156,13 @@ class ProspectDashboardDateTests(SimpleTestCase):
         self.assertTrue(_approved_expired({'approval_status': 'approved', 'appr_date': '2026-09-25'}, old_find, cutoff))
         self.assertTrue(_approved_expired({'approval_status': 'approved', 'appr_date': None}, old_find, cutoff))
         self.assertFalse(_approved_expired({'approval_status': 'pending', 'appr_date': None}, old_find, cutoff))
+
+
+class TruncTests(SimpleTestCase):
+    def test_char_columns_keep_full_korean_length(self):
+        from api.views.assets import _trunc, _trunc_chars
+        text = '가' * 100
+        self.assertEqual(len(_trunc_chars(text, 100)), 100)   # 100 CHAR 컬럼 → 100자 그대로
+        self.assertEqual(len(_trunc(text, 100)), 33)           # 바이트 기준이면 33자로 잘리던 문제
+        self.assertEqual(_trunc_chars(None, 100), None)
+        self.assertLessEqual(len(_trunc('가' * 200, 255).encode('utf-8')), 255)  # 바이트 컬럼(ETC)은 여전히 바이트 한도
