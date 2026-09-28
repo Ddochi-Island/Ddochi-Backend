@@ -13,6 +13,8 @@ import teacher_input
 import telegram_client
 
 logging.basicConfig(level=logging.INFO)
+# httpx가 INFO로 요청 URL 전체를 찍는데 텔레그램 URL에 봇 토큰이 들어 있어서 로그에 토큰이 그대로 남음 — WARNING 이상만.
+logging.getLogger('httpx').setLevel(logging.WARNING)
 logger = logging.getLogger('tel_router')
 
 app = FastAPI()
