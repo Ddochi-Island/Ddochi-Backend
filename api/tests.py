@@ -91,3 +91,36 @@ class DailyReportErrorTests(SimpleTestCase):
         self.assertEqual(r.status_code, 500)
         self.assertFalse(r.json()['success'])
         self.assertIn('boom', r.json()['message'])
+
+
+class TeacherAssignTests(SimpleTestCase):
+    ROW = {'sarang_id': 'SID', 'name': '최지수', 'hab_jae_yang_id': 'HJ1'}
+
+    def _run(self, raw, query_results):
+        from api.views.internal_telegram import _assign_teacher
+        client = MagicMock()
+        client.query_one.side_effect = query_results
+        with patch('api.views.internal_telegram.refresh_matching_dashboard_for_sarang') as refresh:
+            return _assign_teacher(client, 'EF420476', raw), client, refresh
+
+    def test_success_updates_teacher_and_refreshes_dashboard(self):
+        res, client, refresh = self._run('김교사', [self.ROW, {'member_id': 'T1'}])
+        self.assertTrue(res['ok'])
+        self.assertEqual(client.exec.call_args[0][1], ['T1', None, 'HJ1'])
+        refresh.assert_called_once()
+
+    def test_other_region_teacher_stored_as_override(self):
+        res, client, _ = self._run('이명훈(타지역)', [self.ROW])
+        self.assertTrue(res['ok'])
+        self.assertEqual(client.exec.call_args[0][1], [None, '이명훈(타지역)', 'HJ1'])
+
+    def test_unknown_teacher_name_changes_nothing(self):
+        res, client, refresh = self._run('없는사람', [self.ROW, None])
+        self.assertFalse(res['ok'])
+        client.exec.assert_not_called()
+        refresh.assert_not_called()
+
+    def test_unknown_short_code_changes_nothing(self):
+        res, client, _ = self._run('김교사', [None])
+        self.assertFalse(res['ok'])
+        client.exec.assert_not_called()
