@@ -157,12 +157,16 @@ def _assign_teacher(client, short_code, raw_teacher):
         return {'ok': False, 'message': '⚠️ 교사 이름이 비어있어'}
 
     teacher_id, override = None, None
-    if is_other_region:
+    if teacher_name == '-':  # 교사 배정 해제 — 웹 edit_match(type=teacher)와 같은 규칙
+        done = f"✅ {row['name']} — 교사 배정을 해제했어!"
+    elif is_other_region:
         override = raw
+        done = f"✅ {row['name']} — 교사 [{teacher_name}] 입력 완료!"
     else:
         teacher_id = _member_id_by_name(client, teacher_name)
         if not teacher_id:
             return {'ok': False, 'message': f'⚠️ [{teacher_name}] 명단에 없어! 타지역이면 뒤에 "(타지역)"을 붙여줘'}
+        done = f"✅ {row['name']} — 교사 [{teacher_name}] 입력 완료!"
 
     client.exec(
         "UPDATE SARANG_HAB_JAE_YANG SET TEACHER_MEMBER_ID = :1, TEACHER_NAME_OVERRIDE = :2 WHERE HAB_JAE_YANG_ID = :3",
@@ -174,7 +178,7 @@ def _assign_teacher(client, short_code, raw_teacher):
         logging.getLogger('api.views.internal_telegram').warning(
             '[assign_teacher] matching dashboard refresh failed', exc_info=True,
         )
-    return {'ok': True, 'message': f"✅ {row['name']} — 교사 [{teacher_name}] 입력 완료!"}
+    return {'ok': True, 'message': done}
 
 
 @csrf_exempt

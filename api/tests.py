@@ -124,3 +124,10 @@ class TeacherAssignTests(SimpleTestCase):
         res, client, _ = self._run('김교사', [None])
         self.assertFalse(res['ok'])
         client.exec.assert_not_called()
+
+    def test_dash_clears_teacher(self):
+        res, client, refresh = self._run('-', [self.ROW])
+        self.assertTrue(res['ok'])
+        self.assertIn('해제', res['message'])
+        self.assertEqual(client.exec.call_args[0][1], [None, None, 'HJ1'])
+        refresh.assert_called_once()

@@ -151,11 +151,13 @@ def _build_text(team_id, rows):
                 # 전체(수지역) 보드만 지역 태그를 맨 앞에 붙임 — 개별 지역 보드는 기존 그대로.
                 region_prefix = f"{it['region']}지역|" if is_all else ''
                 lines.append(f"<code>{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
-                # 교사 미배정 + 아직 결과 없는 건만 탭형 명령 노출(개별 지역 보드 한정, 수지역
-                # 통합 보드는 대상 아님) — 8자리 서픽스라 <code> 밖 평문으로 둬야 텔레그램이
-                # bot_command로 인식해서 탭하면 입력창에 자동완성됨(32자 넘으면 인식 안 됨).
-                if not is_all and not it['teacher'] and not it['outcome']:
-                    lines.append(f"　　└ 교사 입력: /t_{it['sarang_id'][-8:]} 이름")
+                # 아직 결과 없는 건에 탭형 명령 노출 — 교사가 없으면 '입력', 이미 있으면 '수정'(같은
+                # 명령이 덮어씀, 이름 자리에 '-'를 쓰면 해제). 개별 지역 보드 한정(수지역 통합 보드는
+                # 대상 아님). 8자리 서픽스라 <code> 밖 평문으로 둬야 텔레그램이 bot_command로 인식해서
+                # 탭하면 입력창에 자동완성됨(32자 넘으면 인식 안 됨).
+                if not is_all and not it['outcome']:
+                    label = '교사 수정' if it['teacher'] else '교사 입력'
+                    lines.append(f"　　└ {label}: /t_{it['sarang_id'][-8:]} 이름")
             lines.append('')
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')
