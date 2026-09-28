@@ -78,7 +78,7 @@ def _ox(v):
 
 
 def _trunc(s, max_bytes):
-    # 바이트 세맨틱스(CHAR_USED='B') 컬럼용 — SARANG_HAB_JAE_YANG에선 ETC(255B)/QNA(1000B)만 해당.
+    # 바이트 세맨틱스(CHAR_USED='B') 컬럼용 — SARANG_HAB_JAE_YANG에선 QNA(1000B)만 해당.
     # 한글은 3바이트라 문자수로 자르면 ORA-12899로 저장 자체가 실패함.
     if not s:
         return s
@@ -617,7 +617,7 @@ def submit_result(request, *args, **kwargs):
             _trunc_chars(str(hj.get('selfImage') or '').strip() or None, 255), _trunc_chars(str(hj.get('trouble') or '').strip() or None, 255),
             _trunc_chars(str(hj.get('att') or '').strip() or None, 255), _trunc_chars(str(hj.get('wary') or '').strip() or None, 255),
             _trunc_chars(str(hj.get('dist') or '').strip() or None, 255),
-            _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc(str(hj.get('etc') or '').strip() or None, 255),
+            _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc_chars(str(hj.get('etc') or '').strip() or None, 1000),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ]
 
@@ -1190,7 +1190,7 @@ def submit_habjaeyang_new(request, *args, **kwargs):
             _trunc_chars(str(hj.get('selfImage') or '').strip() or None, 255), _trunc_chars(str(hj.get('trouble') or '').strip() or None, 255),
             _trunc_chars(str(hj.get('att') or '').strip() or None, 255), _trunc_chars(str(hj.get('wary') or '').strip() or None, 255),
             _trunc_chars(str(hj.get('dist') or '').strip() or None, 255),
-            _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc(str(hj.get('etc') or '').strip() or None, 255),
+            _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc_chars(str(hj.get('etc') or '').strip() or None, 1000),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
         ],
     })

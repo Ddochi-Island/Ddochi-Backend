@@ -166,3 +166,7 @@ class TruncTests(SimpleTestCase):
         self.assertEqual(len(_trunc(text, 100)), 33)           # 바이트 기준이면 33자로 잘리던 문제
         self.assertEqual(_trunc_chars(None, 100), None)
         self.assertLessEqual(len(_trunc('가' * 200, 255).encode('utf-8')), 255)  # 바이트 컬럼(ETC)은 여전히 바이트 한도
+
+    def test_etc_allows_1000_korean_chars(self):
+        from api.views.assets import _trunc_chars
+        self.assertEqual(len(_trunc_chars('가' * 1200, 1000)), 1000)
