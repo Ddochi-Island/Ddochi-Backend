@@ -42,6 +42,15 @@ DATA_ROUTER_TIMEOUT_MS = config('DATA_ROUTER_TIMEOUT_MS', default=15000, cast=in
 # services/main 의 SHED_INTERNAL_KEY 와 동일한 값이어야 shed 쪽에서 붙일 수 있음.
 SHED_INTERNAL_KEY = config('SHED_INTERNAL_KEY', default='')
 
+# shed 사이트가 브라우저에서 /api/shed/*를 부를 때 허용할 origin(콤마 구분) — api/cors_middleware.py.
+# 기본값 = 현재 shed 배포(개인계정) + 구 팀 프로젝트. 도메인이 바뀌면 env로 덮어쓰면 됨.
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in config(
+        'CORS_ALLOWED_ORIGINS',
+        default='https://shed-event.vercel.app,https://shedevent.vercel.app',
+    ).split(',') if o.strip()
+]
+
 # JWT 발급/검증 — services/main 의 config.js 와 동일한 env 이름.
 # ACCESS/REFRESH_TTL은 서버 기동 시 한 번만 읽힘 (AUTH_CONFIGS.ACCESS_TTL과
 # 달리 요청마다 다시 읽지 않음 — 원본 동작 그대로).
@@ -85,6 +94,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'api.cors_middleware.ShedCorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
