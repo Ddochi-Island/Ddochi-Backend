@@ -134,12 +134,18 @@ class TeacherAssignTests(SimpleTestCase):
 
 
 class ProspectDashboardDateTests(SimpleTestCase):
-    def test_group_by_matching_date(self):
+    def test_group_by_written_date_pulled_within_3_days_of_match(self):
         from datetime import date
         from api.telegram.prospect_dashboard import _display_date
         today = date(2026, 9, 28)
-        self.assertEqual(_display_date({'mt_date': '2026-09-30', 'approval_status': 'approved'}, today), date(2026, 9, 30))
-        self.assertEqual(_display_date({'mt_date': None}, today), today)
+        # 작성 9/25, 매칭 9/27(2일 뒤) → 작성일 그대로
+        self.assertEqual(_display_date({'hj_date': '2026-09-25', 'mt_date': '2026-09-27'}, today), date(2026, 9, 25))
+        # 작성 9/25, 매칭 9/28(정확히 3일 뒤) → 작성일 그대로
+        self.assertEqual(_display_date({'hj_date': '2026-09-25', 'mt_date': '2026-09-28'}, today), date(2026, 9, 25))
+        # 작성 9/22, 매칭 9/30(8일 뒤) → 매칭 3일 전 9/27
+        self.assertEqual(_display_date({'hj_date': '2026-09-22', 'mt_date': '2026-09-30'}, today), date(2026, 9, 27))
+        # 매칭 날짜 없음 → 작성일
+        self.assertEqual(_display_date({'hj_date': '2026-09-22', 'mt_date': None}, today), date(2026, 9, 22))
 
     def test_approved_kept_two_days_after_approval(self):
         from datetime import date

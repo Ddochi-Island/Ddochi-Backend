@@ -24,6 +24,7 @@ def _fetch_rows(client, team_id):
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
+                  TO_CHAR(hj.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DATE,
                   (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
                      FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
              FROM SARANG s
@@ -54,11 +55,16 @@ def _fmt_md(date_str):
 
 
 def _display_date(r, today):
-    """그룹 위치 = 합재양의 매칭(만남) 예정일, 없으면 오늘. 재가 여부와 무관해서 재가해도 그룹이 안
-    움직임 — 전엔 재가된 건을 '재가한 날'로 옮겨 재가할 때마다 오늘 그룹으로 몰렸음(2026-09-28 6지역
-    신고, 사용자가 매칭 날짜 기준으로 결정). 재가 후 일정 변경은 SARANG_MATCH_HISTORIES에만 반영되고
-    MATCH_SCHEDULED_AT은 안 바뀌어서 그룹은 재가 시점의 매칭 날짜에 고정됨."""
-    return datetime.date.fromisoformat(r['mt_date']) if r.get('mt_date') else today
+    """그룹 위치 = 합재양 작성일(KST). 단 매칭(만남) 예정일이 작성일보다 3일 넘게 뒤면 "매칭 3일 전"으로
+    당겨서, 그룹 날짜가 매칭 3일 이내에 들어오게 함(2026-09-28 사용자 결정 — 레거시 공식과 같되 기준이
+    등록일 대신 합재양 작성일). 재가 여부와 무관해서 재가해도 그룹이 안 움직임. 재가 후 일정 변경은
+    SARANG_MATCH_HISTORIES에만 반영되고 MATCH_SCHEDULED_AT은 안 바뀌어 그룹은 고정됨."""
+    base = datetime.date.fromisoformat(r['hj_date']) if r.get('hj_date') else today
+    if r.get('mt_date'):
+        mt = datetime.date.fromisoformat(r['mt_date'])
+        if (mt - base).days > 3:
+            return mt - datetime.timedelta(days=3)
+    return base
 
 def _approved_expired(r, display_date, two_days_ago):
     """재가된 건 제거 시점 — 재가한 날로부터 2일(2026-09-28 사용자 결정: 찾기 날짜로 묶되, 재가 직후 판에서
