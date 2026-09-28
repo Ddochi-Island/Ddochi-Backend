@@ -1709,6 +1709,7 @@ def shed_pending_reject(request, *args, **kwargs):
 def shed_webhook(request, *args, **kwargs):
     """shed 프로젝트(Google Apps Script 경유)가 호출.
     - 최초 신청(name/phone 포함): SARANG_INTAKE_QUEUE에 pending으로 적재.
+    - type 없이 env/introducer까지 동봉(현재 라이브 GAS의 "이관하기" 페이로드): 바로 submitted로 적재.
     - {type:'update', rowNum}: shed 관리자의 "이관하기" — pending을 submitted로
       전환만 함(Ddochi 담당자의 이관받기/반려하기를 건너뛰지 않도록, SARANG은
       아직 안 만듦)."""
@@ -1794,22 +1795,33 @@ def shed_webhook(request, *args, **kwargs):
 
     client = DataRouterClient()
     existing = client.query_one(
-        "SELECT INTAKE_ID FROM SARANG_INTAKE_QUEUE WHERE PHONE_NORMALIZED = :1 AND STATUS = 'pending' "
+        "SELECT INTAKE_ID FROM SARANG_INTAKE_QUEUE WHERE PHONE_NORMALIZED = :1 AND STATUS IN ('pending', 'submitted') "
         "FETCH FIRST 1 ROWS ONLY",
         [phone_normalized],
     )
     if existing:
         return JsonResponse({'ok': True, 'skipped': True})
 
+    # 현재 라이브 GAS(Code.gs)는 신청 때는 시트에만 저장하고, shed 관리자가 "이관하기"를 누를 때
+    # type 없이 env/introducer까지 채운 전체 페이로드를 한 번에 보냄(레거시 shed-webhook과 같은
+    # 계약) — 그런 요청은 대기(pending)를 거치지 않고 바로 제출(submitted)로 넣어야 이관받기
+    # 목록(shed_pending_list)에 뜸. env/introducer가 없으면 기존처럼 신청 직후의 pending.
+    # 거주지(address)는 큐에 담을 컬럼이 없고 이관받기도 안 옮겨서 여기서도 버림.
+    env = str(body.get('env') or '').strip() or None
+    introducer_name = str(body.get('introducer') or '').strip()
+    is_transfer = bool(env or introducer_name)
+    introducer_id = _member_id_by_name(client, introducer_name) if introducer_name else None
+
     intake_id = uuid.uuid4().hex.upper()
     client.exec(
         """INSERT INTO SARANG_INTAKE_QUEUE
              (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, MBTI, SOURCE_LINK,
-              REGION_NAME, REACTION, LOCATION, REST_TYPE, TM_RESERVED_AT)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11,
-                   CASE WHEN :12 IS NOT NULL THEN TO_TIMESTAMP(:12, 'YYYY-MM-DD"T"HH24:MI') END)""",
+              REGION_NAME, REACTION, LOCATION, REST_TYPE, STATUS, ENV, INTRODUCER_MEMBER_ID, TM_RESERVED_AT)
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14,
+                   CASE WHEN :15 IS NOT NULL THEN TO_TIMESTAMP(:15, 'YYYY-MM-DD"T"HH24:MI') END)""",
         [intake_id, name, phone_raw, phone_normalized, age, mbti, int(event),
-         region, reaction, tm_location, rest_type, tm_datetime],
+         region, reaction, tm_location, rest_type,
+         'submitted' if is_transfer else 'pending', env, introducer_id, tm_datetime],
     )
     return JsonResponse({'ok': True, 'skipped': False, 'intakeId': intake_id})
 
