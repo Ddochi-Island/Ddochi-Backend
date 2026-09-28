@@ -187,3 +187,12 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# DEBUG=False에서는 Django 기본 로깅이 처리 안 된 500(Internal Server Error + 스택트레이스)을 콘솔에
+# 안 내보내서 docker logs로 원인을 볼 수 없었음(2026-09-28, 일일보고 빈 알림 조사 중 발견) — 콘솔로 출력.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False}},
+}
