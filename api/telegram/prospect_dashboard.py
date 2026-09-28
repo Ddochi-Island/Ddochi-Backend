@@ -24,7 +24,7 @@ def _fetch_rows(client, team_id):
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
-                  TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE,
+                  TO_CHAR(hj.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DATE,
                   (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
                      FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
              FROM SARANG s
@@ -55,19 +55,10 @@ def _fmt_md(date_str):
 
 
 def _display_date(r, today):
-    """그룹 위치(찾기 날짜) — 레거시 computeFoundApprovalDate/generateProspectDashboardMessage와 같은 공식:
-    등록일(영업일, 22시 이후 등록은 다음날)과 합재양 만남 예정일 차이가 3일 넘으면 "만남 3일 전",
-    아니면 등록일. 재가 여부와 무관하게 같은 날짜라 재가해도 그룹이 안 움직임 — 전엔 재가된 건을
-    '재가한 날'로 옮겨서 재가할 때마다 오늘 그룹으로 몰렸음(2026-09-28 6지역 신고). 재가 후엔
-    MATCH_SCHEDULED_AT이 안 바뀌어서(edit_match는 재가 뒤 SARANG_MATCH_HISTORIES만 고침) 레거시의
-    '재가 순간에 얼려두기'와 결과가 같음."""
-    biz = datetime.date.fromisoformat(r['biz_date']) if r['biz_date'] else today
-    if r['mt_date']:
-        mt = datetime.date.fromisoformat(r['mt_date'])
-        if (mt - biz).days > 3:
-            return mt - datetime.timedelta(days=3)
-    return biz
-
+    """그룹 위치 = 합재양 작성일(KST) — 재가 여부와 무관해서 재가해도 그룹이 안 움직임.
+    레거시는 등록일 + "만남이 3일 넘게 뒤면 만남 3일 전" 공식이었는데, 현장 기대("올린 날로 묶인다")와
+    달라 9/25 작성·9/30 만남 건이 9/27로 묶이는 혼란이 있어 합재양 작성일로 단순화(2026-09-28 사용자 결정)."""
+    return datetime.date.fromisoformat(r['hj_date']) if r.get('hj_date') else today
 
 def _approved_expired(r, display_date, two_days_ago):
     """재가된 건 제거 시점 — 재가한 날로부터 2일(2026-09-28 사용자 결정: 찾기 날짜로 묶되, 재가 직후 판에서

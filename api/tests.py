@@ -134,13 +134,13 @@ class TeacherAssignTests(SimpleTestCase):
 
 
 class ProspectDashboardDateTests(SimpleTestCase):
-    def test_find_date_formula(self):
+    def test_group_by_habjaeyang_written_date(self):
         from datetime import date
         from api.telegram.prospect_dashboard import _display_date
         today = date(2026, 9, 28)
-        self.assertEqual(_display_date({'biz_date': '2026-09-23', 'mt_date': '2026-09-28'}, today), date(2026, 9, 25))
-        self.assertEqual(_display_date({'biz_date': '2026-09-24', 'mt_date': '2026-09-27'}, today), date(2026, 9, 24))
-        self.assertEqual(_display_date({'biz_date': '2026-09-24', 'mt_date': None}, today), date(2026, 9, 24))
+        # 9/25 작성, 9/30 만남 → 9/25 (전엔 '만남 3일 전' 규칙으로 9/27)
+        self.assertEqual(_display_date({'hj_date': '2026-09-25', 'mt_date': '2026-09-30'}, today), date(2026, 9, 25))
+        self.assertEqual(_display_date({'hj_date': None, 'mt_date': '2026-09-30'}, today), today)
 
     def test_approved_kept_two_days_after_approval(self):
         from datetime import date
