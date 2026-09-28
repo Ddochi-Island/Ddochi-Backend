@@ -24,7 +24,9 @@ def _fetch_rows(client, team_id):
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
-                  TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE
+                  TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE,
+                  (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
+                     FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN SARANG_HAB_JAE_YANG hj   ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
@@ -67,6 +69,15 @@ def _display_date(r, today):
     return biz
 
 
+def _approved_expired(r, display_date, two_days_ago):
+    """재가된 건 제거 시점 — 재가한 날로부터 2일(2026-09-28 사용자 결정: 찾기 날짜로 묶되, 재가 직후 판에서
+    바로 사라지지 않게). 재가 로그가 없는 건(마이그레이션 데이터)은 레거시처럼 찾기 날짜 기준."""
+    if r['approval_status'] != 'approved':
+        return False
+    appr = datetime.date.fromisoformat(r['appr_date']) if r.get('appr_date') else display_date
+    return appr < two_days_ago
+
+
 def _build_text(team_id, rows, chat_id):
     now = timezone.localtime()
     today = now.date()
@@ -75,8 +86,8 @@ def _build_text(team_id, rows, chat_id):
     groups = {}
     for r in rows:
         display_date = _display_date(r, today)
-        if r['approval_status'] == 'approved' and display_date < two_days_ago:
-            continue  # 재가 후 2일 지난 건 목록에서 제거
+        if _approved_expired(r, display_date, two_days_ago):
+            continue
         key = display_date.isoformat()
         g = groups.setdefault(key, {'total': 0, 'approved': 0, 'items': []})
         g['total'] += 1

@@ -131,3 +131,23 @@ class TeacherAssignTests(SimpleTestCase):
         self.assertIn('해제', res['message'])
         self.assertEqual(client.exec.call_args[0][1], [None, None, 'HJ1'])
         refresh.assert_called_once()
+
+
+class ProspectDashboardDateTests(SimpleTestCase):
+    def test_find_date_formula(self):
+        from datetime import date
+        from api.telegram.prospect_dashboard import _display_date
+        today = date(2026, 9, 28)
+        self.assertEqual(_display_date({'biz_date': '2026-09-23', 'mt_date': '2026-09-28'}, today), date(2026, 9, 25))
+        self.assertEqual(_display_date({'biz_date': '2026-09-24', 'mt_date': '2026-09-27'}, today), date(2026, 9, 24))
+        self.assertEqual(_display_date({'biz_date': '2026-09-24', 'mt_date': None}, today), date(2026, 9, 24))
+
+    def test_approved_kept_two_days_after_approval(self):
+        from datetime import date
+        from api.telegram.prospect_dashboard import _approved_expired
+        cutoff = date(2026, 9, 26)
+        old_find = date(2026, 9, 23)
+        self.assertFalse(_approved_expired({'approval_status': 'approved', 'appr_date': '2026-09-28'}, old_find, cutoff))
+        self.assertTrue(_approved_expired({'approval_status': 'approved', 'appr_date': '2026-09-25'}, old_find, cutoff))
+        self.assertTrue(_approved_expired({'approval_status': 'approved', 'appr_date': None}, old_find, cutoff))
+        self.assertFalse(_approved_expired({'approval_status': 'pending', 'appr_date': None}, old_find, cutoff))

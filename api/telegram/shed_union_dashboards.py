@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import in_broadcast_window, send_fresh_dashboard
-from api.telegram.prospect_dashboard import _display_date
+from api.telegram.prospect_dashboard import _approved_expired, _display_date
 from api.telegram.team_config import load_all_team_configs, load_team_config
 
 logger = logging.getLogger('api.telegram.shed_union_dashboards')
@@ -100,7 +100,9 @@ def _fetch_unified_rows(client, regions):
                    hj.HAS_REPLIED, hj.IS_WINDOW_OPENED,
                    TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                    TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
-                   TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE
+                   TO_CHAR((s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul') + INTERVAL '2' HOUR, 'YYYY-MM-DD') AS BIZ_DATE,
+                   (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
+                      FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
               FROM SARANG s
               JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
               JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
@@ -139,7 +141,7 @@ def _build_unified_text(group, title, rows, region_chat_map=None):
     groups = {}
     for r in rows:
         display_date = _display_date(r, today)
-        if r['approval_status'] == 'approved' and display_date < two_days_ago:
+        if _approved_expired(r, display_date, two_days_ago):
             continue
         key = display_date.isoformat()
         g = groups.setdefault(key, {'total': 0, 'approved': 0, 'items': []})
