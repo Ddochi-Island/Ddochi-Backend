@@ -112,6 +112,16 @@ def daily_report_get(request, *args, **kwargs):
 @csrf_exempt
 @require_jwt
 def daily_report(request, *args, **kwargs):
+    # 처리 안 된 예외는 Django 기본 HTML 500이 되고, 프론트 callApi가 그걸 {}로 삼켜서 사용자한텐
+    # 내용 없는 알림창만 뜸(2026-09-25, 09-28 제보) — 원인을 화면과 로그에 남기려고 여기서 한 번에 받음.
+    try:
+        return _daily_report(request)
+    except Exception as e:
+        logger.exception('[daily_report] unexpected error')
+        return JsonResponse({'success': False, 'message': f'저장 실패: {type(e).__name__}: {e}'}, status=500)
+
+
+def _daily_report(request):
     """일일보고 제출(upsert) — 제출 성공 후 그 사람 소속 지역의 일일보고 텔레그램
     메시지를 갱신(기존 메시지 있을 때만 edit, 없으면 조용히 skip — 새로 만드는 건
     정각 크론 몫)."""

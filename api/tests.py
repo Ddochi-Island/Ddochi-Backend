@@ -77,3 +77,17 @@ class ShedWebhookTests(SimpleTestCase):
         args = client.exec.call_args[0][1]
         self.assertIn('S1', args)
         self.assertIn('S2, S3', args)
+
+
+class DailyReportErrorTests(SimpleTestCase):
+    def test_unexpected_exception_returns_readable_message(self):
+        # 빈 알림창 방지: 예상 못 한 예외도 {success:false, message}로 내려가야 함
+        client = MagicMock()
+        client.query_one.side_effect = RuntimeError('boom')
+        with patch('api.auth.gate.auth_jwt.verify', return_value={'sabun': 'S1'}), \
+                patch('api.views.daily_report.DataRouterClient', return_value=client):
+            r = self.client.post('/api/daily-report', data=json.dumps({'name': '홍길동'}),
+                                 content_type='application/json', HTTP_AUTHORIZATION='Bearer x')
+        self.assertEqual(r.status_code, 500)
+        self.assertFalse(r.json()['success'])
+        self.assertIn('boom', r.json()['message'])
