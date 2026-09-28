@@ -1705,6 +1705,35 @@ def shed_pending_reject(request, *args, **kwargs):
     return JsonResponse({'success': True})
 
 
+def _intake_people(client, body):
+    """shed 이관 페이로드에서 유입자/조력자를 MEMBERS.MEMBER_ID로 변환 → (유입자 ID, 조력자 ID 콤마 문자열).
+    이름 텍스트는 저장 안 하고 ID만 저장(표시할 땐 조회 시 MEMBERS 조인). 조력자 = 유입자 추첨(2명 이상
+    후보)에서 낙첨된 사람들. shed가 사번을 같이 보내면 그대로 쓰고(신규), 없거나 재이관 시 placeholder인
+    'existing'이면 이름으로 MEMBERS를 조회해서 구함(구버전 shed 호환 겸용)."""
+    def resolve(sabun, name):
+        sabun = str(sabun or '').strip()
+        if sabun and sabun != 'existing':
+            return sabun
+        name = str(name or '').strip()
+        if not name:
+            return None
+        row = client.query_one(
+            "SELECT MEMBER_ID FROM MEMBERS WHERE NAME = :1 AND DELETED_AT IS NULL FETCH FIRST 1 ROWS ONLY",
+            [name],
+        )
+        return row['member_id'] if row else None
+
+    introducer_id = resolve(body.get('introducerSabun'), body.get('introducer'))
+    helper_names = body.get('helperNames') or []
+    helper_sabuns = body.get('helperSabuns') or []
+    helper_ids = []
+    for i, name in enumerate(helper_names):
+        mid = resolve(helper_sabuns[i] if i < len(helper_sabuns) else None, name)
+        if mid:
+            helper_ids.append(mid)
+    return introducer_id, ', '.join(helper_ids) or None
+
+
 @csrf_exempt
 def shed_webhook(request, *args, **kwargs):
     """shed 프로젝트(Google Apps Script 경유)가 호출.
@@ -1732,33 +1761,7 @@ def shed_webhook(request, *args, **kwargs):
         tm_datetime = str(body.get('tmDatetime') or '').strip() or None
 
         client = DataRouterClient()
-
-        def _resolve_member_id(sabun, name):
-            # shed가 사번을 같이 보내면 그대로 쓰고(신규), 없거나 재이관 시 placeholder인
-            # 'existing'이면 이름으로 MEMBERS를 조회해서 구함(구버전 shed 호환 겸용).
-            sabun = str(sabun or '').strip()
-            if sabun and sabun != 'existing':
-                return sabun
-            name = str(name or '').strip()
-            if not name:
-                return None
-            row = client.query_one(
-                "SELECT MEMBER_ID FROM MEMBERS WHERE NAME = :1 AND DELETED_AT IS NULL FETCH FIRST 1 ROWS ONLY",
-                [name],
-            )
-            return row['member_id'] if row else None
-
-        # 유입자/조력자 — 이름 텍스트는 저장 안 하고 MEMBERS.MEMBER_ID만 저장(표시할 땐
-        # 조회 시 MEMBERS 조인). 유입자 추첨(2명 이상 후보)에서 낙첨된 사람들이 조력자.
-        introducer_id = _resolve_member_id(body.get('introducerSabun'), body.get('introducer'))
-        helper_names = body.get('helperNames') or []
-        helper_sabuns = body.get('helperSabuns') or []
-        helper_ids = []
-        for i, name in enumerate(helper_names):
-            mid = _resolve_member_id(helper_sabuns[i] if i < len(helper_sabuns) else None, name)
-            if mid:
-                helper_ids.append(mid)
-        helper_ids_str = ', '.join(helper_ids) or None
+        introducer_id, helper_ids_str = _intake_people(client, body)
 
         affected = client.exec(
             """UPDATE SARANG_INTAKE_QUEUE
@@ -1810,18 +1813,19 @@ def shed_webhook(request, *args, **kwargs):
     env = str(body.get('env') or '').strip() or None
     introducer_name = str(body.get('introducer') or '').strip()
     is_transfer = bool(env or introducer_name)
-    introducer_id = _member_id_by_name(client, introducer_name) if introducer_name else None
+    introducer_id, helper_ids_str = _intake_people(client, body)
 
     intake_id = uuid.uuid4().hex.upper()
     client.exec(
         """INSERT INTO SARANG_INTAKE_QUEUE
              (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, MBTI, SOURCE_LINK,
-              REGION_NAME, REACTION, LOCATION, REST_TYPE, STATUS, ENV, INTRODUCER_MEMBER_ID, TM_RESERVED_AT)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14,
-                   CASE WHEN :15 IS NOT NULL THEN TO_TIMESTAMP(:15, 'YYYY-MM-DD"T"HH24:MI') END)""",
+              REGION_NAME, REACTION, LOCATION, REST_TYPE, STATUS, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS,
+              TM_RESERVED_AT)
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15,
+                   CASE WHEN :16 IS NOT NULL THEN TO_TIMESTAMP(:16, 'YYYY-MM-DD"T"HH24:MI') END)""",
         [intake_id, name, phone_raw, phone_normalized, age, mbti, int(event),
          region, reaction, tm_location, rest_type,
-         'submitted' if is_transfer else 'pending', env, introducer_id, tm_datetime],
+         'submitted' if is_transfer else 'pending', env, introducer_id, helper_ids_str, tm_datetime],
     )
     return JsonResponse({'ok': True, 'skipped': False, 'intakeId': intake_id})
 

@@ -67,3 +67,13 @@ class ShedWebhookTests(SimpleTestCase):
         r, client = self._post({**self.BASE, 'env': '무난'}, [{'intake_id': 'X'}])
         self.assertEqual(r.json()['skipped'], True)
         client.exec.assert_not_called()
+
+    def test_helpers_carried_with_sabun_and_name_fallback(self):
+        # 추첨 낙첨자(조력자): 사번 있으면 그대로, 'existing' placeholder면 이름으로 MEMBERS 조회
+        payload = {**self.BASE, 'env': '무난', 'introducer': '당첨', 'introducerSabun': 'S1',
+                   'helperNames': ['낙첨A', '낙첨B'], 'helperSabuns': ['S2', 'existing']}
+        r, client = self._post(payload, [None, {'member_id': 'S3'}])
+        self.assertEqual(r.status_code, 200)
+        args = client.exec.call_args[0][1]
+        self.assertIn('S1', args)
+        self.assertIn('S2, S3', args)
