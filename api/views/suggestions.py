@@ -12,8 +12,9 @@ from api.views.daily_report import _json_body
 
 logger = logging.getLogger('api.views.suggestions')
 
-# 레거시와 같은 개발자 알림 방(suggestions.js SUGGESTION_CHAT_ID) — 봇이 그 방 멤버여야 알림이 감.
-SUGGESTION_CHAT_ID = -5495814189
+# 개발자 알림 방 — 레거시 SUGGESTION_CHAT_ID(-5495814189)가 슈퍼그룹으로 전환되면서 번호가 바뀜
+# (텔레그램 migrate_to_chat_id, 2026-09-29 확인). 봇이 그 방 멤버여야 알림이 감.
+SUGGESTION_CHAT_ID = -1004435642724
 
 
 @csrf_exempt
