@@ -2,6 +2,11 @@
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
+from api.auth.gate import require_jwt
+from api.clients.data_router import DataRouterClient
+from api.telegram.team_goals import load_team_goals, save_team_goals
+from api.views.daily_report import _json_body
+
 
 @csrf_exempt
 def get_week_start_dow(request, *args, **kwargs):
@@ -76,19 +81,40 @@ def get_weekly_record(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def get_telegram_goals(request, *args, **kwargs):
-    # TODO: services/main/src/routes/stats.js 의 POST /get-telegram-goals 포팅
+    """지역 목표 조회 — stats.js /get-telegram-goals. team = REGION_CODE."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/stats.js"}, status=501)
+    team = str(_json_body(request).get('team') or '').strip()
+    if not team:
+        return JsonResponse({'success': True, 'goals': {}})
+    return JsonResponse({'success': True, 'goals': load_team_goals(DataRouterClient(), team)})
 
 
 @csrf_exempt
+@require_jwt
 def save_telegram_goals(request, *args, **kwargs):
-    # TODO: services/main/src/routes/stats.js 의 POST /save-telegram-goals 포팅
+    """지역 목표 저장 — stats.js /save-telegram-goals. 레거시처럼 관리자·지역 직책만: 관리자 모드(adminUnlocked)
+    이거나 직책 SCOPE가 global/region."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/stats.js"}, status=501)
+    client = DataRouterClient()
+    sabun = request.user['sabun']
+    allowed = request.user.get('adminUnlocked') or client.query_one(
+        """SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS mpm JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+            WHERE mpm.MEMBER_ID = :1 AND pc.SCOPE IN ('global', 'region')""",
+        [sabun],
+    )
+    if not allowed:
+        return JsonResponse({'success': False, 'message': '관리자/지역 직책만 목표를 바꿀 수 있어'}, status=403)
+    body = _json_body(request)
+    team = str(body.get('team') or '').strip()
+    goals = body.get('goals')
+    if not team or not isinstance(goals, dict):
+        return JsonResponse({'success': False, 'message': 'team/goals 필요'}, status=400)
+    save_team_goals(client, team, goals, sabun)
+    return JsonResponse({'success': True, 'message': '저장 완료!'})
 
 
 @csrf_exempt

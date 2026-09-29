@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from api.auth.gate import require_jwt
 from api.clients.data_router import DataRouterClient
 from api.telegram.team_config import load_all_team_configs, load_team_config
+from api.telegram.team_goals import area_key
 
 
 def _json_body(request):
@@ -51,11 +52,22 @@ def get_teams(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def get_team_areas(request, *args, **kwargs):
-    # TODO: services/main/src/routes/teams.js 의 POST /get-team-areas 포팅
+    """목표 설정 화면의 구역 목록 — AREAS 테이블이 없어서 그 지역 현재 소속 회원들의 DISTRICT_CODE로 대신함.
+    키 형식은 team_goals.area_key()('N구역')로 목표 CONFIG와 맞춤."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/teams.js"}, status=501)
+    team = str(_json_body(request).get('team') or '').strip()
+    if not team:
+        return JsonResponse({'success': False, 'message': 'team 필요'}, status=400)
+    rows = DataRouterClient().query(
+        """SELECT DISTINCT DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES
+            WHERE IS_CURRENT = 1 AND REGION_CODE = :1 AND DISTRICT_CODE IS NOT NULL AND DISTRICT_CODE != '0'""",
+        [team],
+    )
+    codes = sorted((r['district_code'] for r in rows), key=lambda c: (not c.isdigit(), int(c) if c.isdigit() else 0, c))
+    return JsonResponse({'success': True, 'areas': [area_key(c) for c in codes]})
 
 
 @csrf_exempt
