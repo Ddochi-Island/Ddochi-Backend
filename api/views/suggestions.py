@@ -54,13 +54,14 @@ def suggestions_submit(request, *args, **kwargs):
 @csrf_exempt
 @require_jwt
 def suggestions_list(request, *args, **kwargs):
-    # 레거시는 로그인만 하면 누구나 조회 가능했지만, 건의 내용이 전원에게 노출될 이유가 없어서
-    # 관리자(POSITION_CODES.SCOPE='global' — 관리자/수지역장)로 제한. 화면도 관리자 화면에만 있음.
+    # 레거시는 로그인만 하면 누구나 조회 가능했지만, 건의 내용이 전원에게 노출될 이유가 없어서 관리자로 제한.
+    # 관리자 화면은 직책이 아니라 비밀번호(admin-unlock → adminUnlocked 클레임)로 들어가므로 그걸 우선 인정하고,
+    # 직책상 관리자(SCOPE='global' — 관리자/수지역장)도 허용.
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
     client = DataRouterClient()
-    is_admin = client.query_one(
+    is_admin = request.user.get('adminUnlocked') or client.query_one(
         """SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS mpm
              JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
             WHERE mpm.MEMBER_ID = :1 AND pc.SCOPE = 'global'""",
