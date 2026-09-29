@@ -24,6 +24,7 @@ from .views import shared_leads_claim
 from .views import shared_leads_notify
 from .views import shed_report
 from .views import shed_users
+from .views import suggestions
 from .views import sheet_sync
 from .views import sheets
 from .views import short_card
@@ -240,6 +241,8 @@ api_urlpatterns = [
     path('feedback-slots/pass-list', feedback.feedback_slots_pass_list, name='feedback_feedback_slots_pass_list'),
     path('feedback-slots/result', feedback.feedback_slots_result, name='feedback_feedback_slots_result'),
     path('shed/users', shed_users.shed_users, name='shed_users_shed_users'),
+    path('suggestions/submit', suggestions.suggestions_submit, name='suggestions_submit'),
+    path('suggestions/list', suggestions.suggestions_list, name='suggestions_list'),
     path('shed/report', shed_report.shed_report, name='shed_report_shed_report'),
     path('shared-leads/notify', shared_leads_notify.shared_leads_notify, name='shared_leads_notify_shared_leads_notify'),
 ]
