@@ -1,6 +1,7 @@
 """dailyReport.js 포팅 대상 — daily_report 라우트 스텁 (구조만, 로직은 미구현).
-daily_report/daily_report_get/daily_report_list_names 셋만 실제 구현 — 나머지(주간
-계획/plan-execution/reflections 등)는 별개의 "일일 계획" 서브시스템이라 범위 밖."""
+daily_report/daily_report_get/daily_report_list_names/daily_report_reflections만 실제 구현 — 나머지(주간
+계획/plan-execution 등)는 별개의 "일일 계획" 서브시스템이라 범위 밖."""
+import datetime
 import json
 import logging
 
@@ -82,7 +83,7 @@ def daily_report_get(request, *args, **kwargs):
 
     row = client.query_one(
         """SELECT ACTIVITY, TALK_COUNT, DM_COUNT, QR_COUNT, ONLINE_INTAKE_COUNT,
-                  PROMO_LIST, REG_LIST, IS_FINAL, SUBMITTED_AT
+                  PROMO_LIST, REG_LIST, IS_FINAL, SUBMITTED_AT, MOOD, REFLECTION
              FROM DAILY_REPORTS WHERE REPORT_DATE = TO_DATE(:1, 'YYYY-MM-DD') AND MEMBER_ID = :2""",
         [date_key, member_id],
     )
@@ -105,6 +106,8 @@ def daily_report_get(request, *args, **kwargs):
             'regList': reg_list,
             'isFinal': row['is_final'] == '1',
             'submittedAt': row['submitted_at'],
+            'mood': int(row['mood']) if row['mood'] else None,
+            'reflection': row['reflection'] or '',
         },
     })
 
@@ -151,8 +154,16 @@ def _daily_report(request):
             return 0
 
     reg_list_json = json.dumps(body.get('regList') or [])
+    mood = _int(body.get('mood'))
+    mood = mood if 1 <= mood <= 10 else None
+    reflection = str(body.get('reflection') or '').strip() or None
 
     try:
+        vals = [
+            author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
+            _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
+            1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'], mood, reflection,
+        ]
         client.exec(
             """MERGE INTO DAILY_REPORTS dr
                USING (SELECT TO_DATE(:1, 'YYYY-MM-DD') AS REPORT_DATE, :2 AS MEMBER_ID FROM dual) src
@@ -160,24 +171,16 @@ def _daily_report(request):
              WHEN MATCHED THEN UPDATE SET
                     AUTHOR_MEMBER_ID = :3, ACTIVITY = :4, TALK_COUNT = :5, DM_COUNT = :6,
                     QR_COUNT = :7, ONLINE_INTAKE_COUNT = :8, PROMO_LIST = :9, REG_LIST = :10,
-                    IS_FINAL = :11, SNAP_REGION_CODE = :12, SNAP_DISTRICT_CODE = :13,
-                    SUBMITTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP, UPDATED_BY = :14
+                    IS_FINAL = :11, SNAP_REGION_CODE = :12, SNAP_DISTRICT_CODE = :13, MOOD = :14, REFLECTION = :15,
+                    SUBMITTED_AT = SYSTIMESTAMP, UPDATED_AT = SYSTIMESTAMP, UPDATED_BY = :16
              WHEN NOT MATCHED THEN INSERT
                     (REPORT_DATE, MEMBER_ID, AUTHOR_MEMBER_ID, ACTIVITY, TALK_COUNT, DM_COUNT,
                      QR_COUNT, ONLINE_INTAKE_COUNT, PROMO_LIST, REG_LIST, IS_FINAL,
-                     SNAP_REGION_CODE, SNAP_DISTRICT_CODE, CREATED_BY, UPDATED_BY)
-                  VALUES (TO_DATE(:15, 'YYYY-MM-DD'), :16, :17, :18, :19, :20,
-                          :21, :22, :23, :24, :25, :26, :27, :28, :29)""",
-            [
-                date_key, member_id,
-                author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
-                _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
-                1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'],
-                author_sabun,
-                date_key, member_id, author_sabun, activity, _int(body.get('talkCount')), _int(body.get('dmCount')),
-                _int(body.get('qrCount')), _int(body.get('onlineIntakeCount')), str(body.get('promoList') or ''), reg_list_json,
-                1 if body.get('isFinal') else 0, target_ctx['team_id'], target_ctx['area_id'], author_sabun, author_sabun,
-            ],
+                     SNAP_REGION_CODE, SNAP_DISTRICT_CODE, MOOD, REFLECTION, CREATED_BY, UPDATED_BY)
+                  VALUES (TO_DATE(:17, 'YYYY-MM-DD'), :18, :19, :20, :21, :22,
+                          :23, :24, :25, :26, :27, :28, :29, :30, :31, :32, :33)""",
+            [date_key, member_id, *vals, author_sabun,
+             date_key, member_id, *vals, author_sabun, author_sabun],
         )
     except DataRouterError as e:
         logger.warning('[daily_report] MERGE failed: %s', e)
@@ -281,10 +284,74 @@ def get_audit_logs(request, *args, **kwargs):
     return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/dailyReport.js"}, status=501)
 
 
+# 느낀점 열람은 팀장급 이상만(레거시 dailyReport.js:851 isAdminUser/hasRegionRole/hasTeamRole 미러) —
+# 전역/지역 직책은 전 지역, 팀 직책(지역장/전도팀장/지역부서기/지역부전서)은 자기 지역만.
+_REFLECTION_TEAM_POSITIONS = {'team_lead', 'team_evangelist', 'team_clerk', 'team_mission_clerk'}
+
+
 @csrf_exempt
+@require_jwt
 def daily_report_reflections(request, *args, **kwargs):
-    # TODO: services/main/src/routes/dailyReport.js 의 POST /daily-report/reflections 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/dailyReport.js"}, status=501)
+
+    client = DataRouterClient()
+    viewer = client.query_one(
+        """SELECT mah.REGION_CODE, mpm.POSITION_CODE, pc.SCOPE
+             FROM MEMBERS m
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+             LEFT JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = m.MEMBER_ID
+             LEFT JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+            WHERE m.MEMBER_ID = :1
+            ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
+            FETCH FIRST 1 ROWS ONLY""",
+        [request.user['sabun']],
+    ) or {}
+    if viewer.get('scope') in ('global', 'region'):
+        scope = 'all'
+    elif viewer.get('position_code') in _REFLECTION_TEAM_POSITIONS:
+        scope = 'team'
+    else:
+        return JsonResponse({'success': False, 'message': '권한이 없어 — 팀장급 이상만 조회 가능'}, status=403)
+
+    body = _json_body(request)
+    if scope == 'team':
+        team_filter = viewer.get('region_code') or '__none__'
+    else:
+        team_filter = str(body.get('teamId') or '').strip() or None
+
+    date_to = str(body.get('dateTo') or '').strip() or get_business_date()
+    date_from = str(body.get('dateFrom') or '').strip() or (
+        datetime.date.fromisoformat(date_to) - datetime.timedelta(days=13)).isoformat()
+
+    sql = """SELECT TO_CHAR(dr.REPORT_DATE, 'YYYY-MM-DD') AS REPORT_DATE, dr.MEMBER_ID, dr.REFLECTION, dr.MOOD,
+                    dr.SNAP_REGION_CODE, m.NAME AS USER_NAME, dr.SUBMITTED_AT
+               FROM DAILY_REPORTS dr
+               JOIN MEMBERS m ON m.MEMBER_ID = dr.MEMBER_ID
+              WHERE dr.REPORT_DATE >= TO_DATE(:1, 'YYYY-MM-DD') AND dr.REPORT_DATE <= TO_DATE(:2, 'YYYY-MM-DD')
+                AND dr.REFLECTION IS NOT NULL AND dr.DELETED_AT IS NULL"""
+    args = [date_from, date_to]
+    if team_filter:
+        sql += " AND dr.SNAP_REGION_CODE = :3"
+        args.append(team_filter)
+    sql += " ORDER BY dr.REPORT_DATE DESC, dr.SUBMITTED_AT DESC"
+    rows = client.query(sql, args, fetch_limit=5000)
+
+    items = [{
+        'date': r['report_date'], 'sabun': r['member_id'], 'name': r['user_name'],
+        'teamId': r['snap_region_code'], 'teamName': f"{r['snap_region_code']}지역" if r['snap_region_code'] else '',
+        'mood': int(r['mood']) if r['mood'] else None, 'reflection': r['reflection'],
+        'submittedAt': r['submitted_at'],
+    } for r in rows if (r['reflection'] or '').strip()]
+
+    teams = []
+    if scope == 'all':
+        codes = client.query(
+            """SELECT DISTINCT REGION_CODE FROM MEMBER_AFFILIATION_HISTORIES
+                WHERE IS_CURRENT = 1 AND REGION_CODE IS NOT NULL AND REGION_CODE != '0' ORDER BY REGION_CODE"""
+        )
+        teams = [{'teamId': c['region_code'], 'name': f"{c['region_code']}지역"} for c in codes]
+
+    return JsonResponse({'success': True, 'scope': scope, 'teams': teams,
+                         'dateFrom': date_from, 'dateTo': date_to, 'list': items})
 

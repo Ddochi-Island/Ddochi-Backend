@@ -3,7 +3,8 @@
 -- ================================================================
 -- Ddochi/services/main/src/routes/dailyReport.js의 DAILY_REPORTS 포팅.
 -- 레거시 대비 축소: SABUN→MEMBER_ID, AREAS 없어서 SNAP_DISTRICT_CODE로 대체,
--- FLYER_COUNT/MOOD/REFLECTION/DAILY_REPORT_LEAVES는 현재 프론트가 안 보내서 제외.
+-- FLYER_COUNT/DAILY_REPORT_LEAVES는 제외. MOOD/REFLECTION은 처음엔 빠졌다가 프론트가 실제로
+-- 보내고 있어서 2026-09-29 운영 DB에 ALTER로 추가함(아래 ALTER 참고).
 -- ================================================================
 
 CREATE TABLE DAILY_REPORTS (
@@ -35,6 +36,8 @@ CREATE INDEX IX_DR_REGION_DATE ON DAILY_REPORTS (SNAP_REGION_CODE, REPORT_DATE);
 
 COMMENT ON TABLE DAILY_REPORTS IS '일일보고 제출 — 개인 활동 기록(톡/DM/QR/온라인유입) + 제출 시점 소속 스냅샷';
 COMMENT ON COLUMN DAILY_REPORTS.AUTHOR_MEMBER_ID IS '실제로 제출한 사람 — 팀장 등이 대리 제출 가능해서 MEMBER_ID와 다를 수 있음';
+ALTER TABLE DAILY_REPORTS ADD (MOOD NUMBER(2) CHECK (MOOD BETWEEN 1 AND 10), REFLECTION CLOB);
+
 COMMENT ON COLUMN DAILY_REPORTS.PROMO_LIST IS 'JSON 배열 [{school,path,tool}] — 오늘 홍보한 곳';
 COMMENT ON COLUMN DAILY_REPORTS.REG_LIST IS 'JSON 배열 [{name,verbalManFix,result}] — 구두 등록/만픽 메모';
 COMMENT ON COLUMN DAILY_REPORTS.SNAP_REGION_CODE   IS '제출 시점 소속 지역(구 팀) 스냅샷 — MEMBER_AFFILIATION_HISTORIES.REGION_CODE';
