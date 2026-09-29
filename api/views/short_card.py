@@ -22,9 +22,9 @@ _TIER_GROUP = {'group_lead'}
 _TIER_DISTRICT_ALL = {'area_lead'}
 _TIER_DISTRICT_GENERAL = {'sub_area_lead', 'team_clerk', 'team_mission_clerk', 'area_secretary'}
 
-# 짧카 재가 — 전도팀장/지역장만 (밭 관리하기 조회 RBAC의 "지역 전체" 티어보다 좁음).
-_APPROVAL_TIER = {'team_evangelist', 'team_lead'}
-_APPROVAL_STATUS_KO = {'pending': '대기중', 'approved': '재가완료', 'rejected': '반려됨'}
+# 반 떡잎 목표 — 반마다 떡잎 5개를 유지(2026-09-30 사용자 결정). 밭 관리하기 상단/일일보고 텔레그램에 표시.
+GROUP_SPROUT_GOAL = 5
+_SPROUT_STATUS_KO = {'pending': '떡잎 재가 대기', 'approved': '떡잎 재가 완료', 'rejected': '떡잎 반려'}
 
 # 농부일지 필드 — 단계 판정에 쓰는 필드만(짧카 자체 필드 age/gender/phone/residence/
 # school_major/environment는 list_short_cards가 이미 내려주던 걸 그대로 씀).
@@ -112,17 +112,75 @@ def _scope_sql(ctx, sabun):
     return 'sc.MEMBER_ID = :1', [sabun]
 
 
-def _journal_stage(row):
-    """씨앗(기본)/새싹(2단계 완료)/떡잎(3단계 완료). 사용자 확정: 1단계 다 채워지면
-    씨앗, 2단계 다 채워지면 새싹, 3단계 다 채워지면 떡잎."""
+def _stage3_complete(row):
     s1 = all(row.get(k) for k in ('gender', 'age', 'relation', 'phone', 'residence'))
     s2 = s1 and all(row.get(k) for k in ('school_major', 'personality', 'hobby', 'has_partner', 'family_relation', 'environment'))
     s3 = s2 and all(row.get(k) for k in ('desired_image', 'recent_concern', 'family_atmosphere', 'human_relations'))
-    if s3:
+    return s1, s2, s3
+
+
+def _journal_stage(row):
+    """씨앗(기본)/새싹(2단계 완료)/떡잎(3단계 완료 + 반장 이상 재가). 3단계를 다 채워도 재가 전엔 새싹
+    (2026-09-30 변경 — 전엔 3단계만 채우면 바로 떡잎)."""
+    _, s2, s3 = _stage3_complete(row)
+    if s3 and row.get('sprout_status') == 'approved':
         return '떡잎'
     if s2:
         return '새싹'
     return '씨앗'
+
+
+def _can_decide_sprout(ctx, card_region, card_district):
+    """떡잎 재가 권한 — 그 짧카(작성자 구역)가 속한 반의 반장 + 그 위 직책(같은 지역의 지역 티어, 전역)."""
+    code = ctx['position_code']
+    if code in _TIER_GLOBAL:
+        return True
+    if card_region != ctx['region_code']:
+        return False
+    if code in _TIER_REGION:
+        return True
+    return code in _TIER_GROUP and card_district in ctx['group_districts']
+
+
+def group_sprout_status(client, region_codes=None):
+    """반별 떡잎 수 — [{groupId, region, name, leaderName, sprouts, goal}]. 떡잎 = 3단계 완료 + 떡잎 재가,
+    작성자의 현재 구역이 그 반에 속한 짧카만 셈. region_codes가 None이면 전 지역."""
+    sql = """SELECT g.GROUP_ID, g.REGION_CODE, g.GROUP_NAME, g.DISTRICT_CODES, m.NAME AS LEADER_NAME
+               FROM DISTRICT_GROUPS g LEFT JOIN MEMBERS m ON m.MEMBER_ID = g.LEADER_MEMBER_ID
+              WHERE g.DELETED_AT IS NULL"""
+    args = []
+    if region_codes is not None:
+        if not region_codes:
+            return []
+        marks = ', '.join(f':{i + 1}' for i in range(len(region_codes)))
+        sql += f' AND g.REGION_CODE IN ({marks})'
+        args = list(region_codes)
+    groups = client.query(sql + ' ORDER BY g.REGION_CODE, g.GROUP_NAME', args)
+    if not groups:
+        return []
+    cols = ', '.join(f'sc.{f.upper()}' for f in _JOURNAL_FIELDS)
+    cards = client.query(
+        f"""SELECT mah.REGION_CODE, mah.DISTRICT_CODE, sc.AGE, sc.GENDER, sc.PHONE, sc.RESIDENCE,
+                   sc.SCHOOL_MAJOR, sc.ENVIRONMENT, sc.SPROUT_STATUS, {cols}
+              FROM SHORT_CARDS sc
+              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = sc.MEMBER_ID AND mah.IS_CURRENT = 1
+             WHERE sc.DELETED_AT IS NULL AND sc.APPROVAL_STATUS = 'approved' AND sc.SPROUT_STATUS = 'approved'""",
+        fetch_limit=5000,
+    )
+    sprouts = {}
+    for c in cards:
+        if _journal_stage(c) == '떡잎':
+            key = (c['region_code'], c['district_code'])
+            sprouts[key] = sprouts.get(key, 0) + 1
+    out = []
+    for g in groups:
+        districts = [d for d in (g['district_codes'] or '').split(',') if d]
+        out.append({
+            'groupId': g['group_id'], 'region': g['region_code'], 'name': g['group_name'],
+            'leaderName': g['leader_name'], 'goal': GROUP_SPROUT_GOAL,
+            'sprouts': sum(sprouts.get((g['region_code'], d), 0) for d in districts),
+        })
+    return out
 
 
 @csrf_exempt
@@ -192,8 +250,8 @@ def submit_short_card(request, *args, **kwargs):
     client.exec(
         """INSERT INTO SHORT_CARDS
              (SHORT_CARD_ID, MEMBER_ID, NAME, AGE, GENDER, PHONE, PHONE_NORMALIZED,
-              SCHOOL_MAJOR, ENVIRONMENT, RESIDENCE, RELIGION, RECRUIT_NOTE, CREATED_BY, UPDATED_BY)
-           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :13)""",
+              SCHOOL_MAJOR, ENVIRONMENT, RESIDENCE, RELIGION, RECRUIT_NOTE, APPROVAL_STATUS, CREATED_BY, UPDATED_BY)
+           VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, 'approved', :13, :13)""",
         [short_card_id, guide_sabun, name, age, gender, phone, phone_normalized,
          school_major, environment, residence, religion, recruit_note, sabun],
     )
@@ -210,7 +268,7 @@ def submit_short_card(request, *args, **kwargs):
 @csrf_exempt
 @require_jwt
 def list_short_cards(request, *args, **kwargs):
-    """밭 관리하기 — 직책별 RBAC로 범위를 좁혀서 짧카 목록을 보여줌."""
+    """밭 관리하기 — 직책별 RBAC로 범위를 좁혀서 짧카 목록 + (반장 이상) 반별 떡잎 목표 현황."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -225,72 +283,82 @@ def list_short_cards(request, *args, **kwargs):
     rows = client.query(
         f"""SELECT sc.SHORT_CARD_ID, sc.NAME, sc.AGE, sc.GENDER, sc.PHONE, sc.SCHOOL_MAJOR,
                    sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE, sc.CREATED_AT,
-                   sc.APPROVAL_STATUS, sc.MEMBER_ID, m.NAME AS AUTHOR_NAME, {journal_cols}
+                   sc.APPROVAL_STATUS, sc.SPROUT_STATUS, sc.MEMBER_ID, m.NAME AS AUTHOR_NAME,
+                   mah.REGION_CODE AS AUTHOR_REGION, mah.DISTRICT_CODE AS AUTHOR_DISTRICT, {journal_cols}
               FROM SHORT_CARDS sc
               JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
-             WHERE sc.DELETED_AT IS NULL AND {scope_sql}
+              LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = sc.MEMBER_ID AND mah.IS_CURRENT = 1
+             WHERE sc.DELETED_AT IS NULL AND sc.APPROVAL_STATUS = 'approved' AND {scope_sql}
              ORDER BY sc.CREATED_AT DESC""",
         scope_args,
     )
     for r in rows:
-        r['approval_status_label'] = _APPROVAL_STATUS_KO.get(r['approval_status'], r['approval_status'])
-        r['stage'] = _journal_stage(r) if r['approval_status'] == 'approved' else None
-    can_approve = position_code in _APPROVAL_TIER
+        r['stage'] = _journal_stage(r)
+        r['sprout_status_label'] = _SPROUT_STATUS_KO.get(r['sprout_status'])
+        r['can_decide_sprout'] = (r['sprout_status'] == 'pending'
+                                  and _can_decide_sprout(ctx, r['author_region'], r['author_district']))
 
     if position_code in _TIER_GLOBAL:
         others_label = '전체의 밭'
+        goals = group_sprout_status(client)
     elif position_code in _TIER_REGION:
         others_label = '지역의 밭'
+        goals = group_sprout_status(client, [ctx['region_code']])
     elif position_code in _TIER_GROUP:
         others_label = '반의 밭'
+        goals = [g for g in group_sprout_status(client, [ctx['region_code']])
+                 if g['groupId'] in _led_group_ids(client, sabun)]
     elif position_code in _TIER_DISTRICT_ALL or position_code in _TIER_DISTRICT_GENERAL:
         others_label = '구역의 밭'
+        goals = []
     else:
         others_label = None  # 회원 등 본인만 보이는 티어 — "남의 밭" 자체가 없음
+        goals = []
 
-    return JsonResponse({'success': True, 'list': rows, 'canApprove': can_approve, 'othersLabel': others_label})
+    return JsonResponse({'success': True, 'list': rows, 'othersLabel': others_label, 'groupGoals': goals})
+
+
+def _led_group_ids(client, sabun):
+    return {r['group_id'] for r in client.query(
+        "SELECT GROUP_ID FROM DISTRICT_GROUPS WHERE LEADER_MEMBER_ID = :1 AND DELETED_AT IS NULL", [sabun])}
 
 
 @csrf_exempt
 @require_jwt
-def approve_short_card(request, *args, **kwargs):
-    """짧카 재가/반려 — 전도팀장/지역장만, 그것도 같은 지역 짧카만."""
+def decide_sprout(request, *args, **kwargs):
+    """떡잎 재가/반려 — 3단계를 다 채워 재가 대기(SPROUT_STATUS='pending')인 짧카만, 그 반의 반장 이상."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
     body = _json_body(request)
     short_card_id = str(body.get('shortCardId') or '').strip()
-    status_map = {'재가': 'approved', '반려': 'rejected'}
-    enum_val = status_map.get(str(body.get('status') or '').strip())
+    enum_val = {'재가': 'approved', '반려': 'rejected'}.get(str(body.get('status') or '').strip())
     if not short_card_id or not enum_val:
         return JsonResponse({'success': False, 'message': 'shortCardId, status 필요'}, status=400)
 
     sabun = request.user['sabun']
     client = DataRouterClient()
-
-    ctx = _caller_ctx(client, sabun)
-    if ctx['position_code'] not in _APPROVAL_TIER:
-        return JsonResponse({'success': False, 'message': '전도팀장/지역장만 재가할 수 있어요'}, status=403)
-
     card = client.query_one(
-        "SELECT MEMBER_ID FROM SHORT_CARDS WHERE SHORT_CARD_ID = :1 AND DELETED_AT IS NULL",
+        """SELECT sc.NAME, sc.SPROUT_STATUS, mah.REGION_CODE, mah.DISTRICT_CODE
+             FROM SHORT_CARDS sc
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = sc.MEMBER_ID AND mah.IS_CURRENT = 1
+            WHERE sc.SHORT_CARD_ID = :1 AND sc.DELETED_AT IS NULL""",
         [short_card_id],
     )
     if not card:
         return JsonResponse({'success': False, 'message': '짧카를 찾을 수 없어요'}, status=404)
-
-    author = client.query_one(
-        "SELECT REGION_CODE FROM MEMBER_AFFILIATION_HISTORIES WHERE MEMBER_ID = :1 AND IS_CURRENT = 1",
-        [card['member_id']],
-    )
-    if not author or author['region_code'] != ctx['region_code']:
-        return JsonResponse({'success': False, 'message': '같은 지역의 짧카만 재가할 수 있어요'}, status=403)
+    if card['sprout_status'] != 'pending':
+        return JsonResponse({'success': False, 'message': '떡잎 재가 대기 중인 짧카가 아니에요'}, status=400)
+    if not _can_decide_sprout(_caller_ctx(client, sabun), card['region_code'], card['district_code']):
+        return JsonResponse({'success': False, 'message': '그 반의 반장 이상만 떡잎 재가를 할 수 있어요'}, status=403)
 
     client.exec(
-        "UPDATE SHORT_CARDS SET APPROVAL_STATUS = :1, UPDATED_BY = :2 WHERE SHORT_CARD_ID = :3",
-        [enum_val, sabun, short_card_id],
+        """UPDATE SHORT_CARDS SET SPROUT_STATUS = :1, SPROUT_DECIDED_BY = :2, SPROUT_DECIDED_AT = SYSTIMESTAMP,
+                  UPDATED_BY = :3 WHERE SHORT_CARD_ID = :4""",
+        [enum_val, sabun, sabun, short_card_id],
     )
-    return JsonResponse({'success': True, 'message': f"{_APPROVAL_STATUS_KO[enum_val]} 처리했어요"})
+    msg = f"🍀 {card['name']} 떡잎이 됐어요!" if enum_val == 'approved' else f"{card['name']} 떡잎 재가를 반려했어요"
+    return JsonResponse({'success': True, 'message': msg})
 
 
 @csrf_exempt
@@ -313,7 +381,7 @@ def get_short_card_journal(request, *args, **kwargs):
     row = client.query_one(
         f"""SELECT sc.SHORT_CARD_ID, sc.MEMBER_ID, sc.NAME, sc.AGE, sc.GENDER, sc.PHONE,
                    sc.SCHOOL_MAJOR, sc.ENVIRONMENT, sc.RESIDENCE, sc.RELIGION, sc.RECRUIT_NOTE,
-                   sc.APPROVAL_STATUS, m.NAME AS AUTHOR_NAME, mah.REGION_CODE, mah.DISTRICT_CODE,
+                   sc.APPROVAL_STATUS, sc.SPROUT_STATUS, m.NAME AS AUTHOR_NAME, mah.REGION_CODE, mah.DISTRICT_CODE,
                    {journal_cols}
               FROM SHORT_CARDS sc
               JOIN MEMBERS m ON m.MEMBER_ID = sc.MEMBER_ID
@@ -350,7 +418,8 @@ def get_short_card_journal(request, *args, **kwargs):
     if not in_scope:
         return JsonResponse({'success': False, 'message': '볼 수 없는 짧카예요'}, status=403)
 
-    row['stage'] = _journal_stage(row) if row['approval_status'] == 'approved' else None
+    row['stage'] = _journal_stage(row)
+    row['sprout_status_label'] = _SPROUT_STATUS_KO.get(row['sprout_status'])
     row['is_editable'] = is_author
     return JsonResponse({'success': True, 'card': row})
 
@@ -416,4 +485,23 @@ def save_short_card_journal(request, *args, **kwargs):
     args_.append(short_card_id)
 
     client.exec(f"UPDATE SHORT_CARDS SET {', '.join(sets)} WHERE SHORT_CARD_ID = :{n}", args_)
+
+    # 3단계를 다 채우면 떡잎 재가 요청(대기), 반려됐던 건 다시 채워 저장하면 재요청. 이미 떡잎이면 그대로.
+    cols = ', '.join(f.upper() for f in _JOURNAL_FIELDS)
+    cur = client.query_one(
+        f"""SELECT AGE, GENDER, PHONE, RESIDENCE, SCHOOL_MAJOR, ENVIRONMENT, SPROUT_STATUS, {cols}
+              FROM SHORT_CARDS WHERE SHORT_CARD_ID = :1""",
+        [short_card_id],
+    )
+    _, _, s3 = _stage3_complete(cur)
+    sprout = cur['sprout_status']
+    if s3 and sprout in (None, 'rejected'):
+        client.exec(
+            "UPDATE SHORT_CARDS SET SPROUT_STATUS = 'pending', SPROUT_DECIDED_BY = NULL, SPROUT_DECIDED_AT = NULL WHERE SHORT_CARD_ID = :1",
+            [short_card_id],
+        )
+        return JsonResponse({'success': True, 'sproutRequested': True,
+                             'message': '3단계를 다 썼어요! 반장님이 재가하면 떡잎이 돼요 🍀'})
+    if not s3 and sprout == 'pending':
+        client.exec("UPDATE SHORT_CARDS SET SPROUT_STATUS = NULL WHERE SHORT_CARD_ID = :1", [short_card_id])
     return JsonResponse({'success': True, 'message': '농부일지 저장했어요!'})

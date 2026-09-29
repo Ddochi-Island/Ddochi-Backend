@@ -17,6 +17,7 @@ from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.team_config import load_team_config
 from api.telegram.team_goals import load_team_goal_total
 from api.util.business_date import BUSINESS_DAY_BOUNDARY_HOUR, get_dashboard_biz_date
+from api.views.short_card import group_sprout_status
 
 logger = logging.getLogger('api.telegram.team_stats')
 
@@ -148,7 +149,8 @@ def _promo_items(promo_list_str):
     return [seg.strip() for seg in promo_list_str.split(',') if seg.strip()]
 
 
-def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_submissions, districts, leaders, goals):
+def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_submissions, districts, leaders, goals,
+                group_sprouts=()):
     now = timezone.localtime()
 
     # ── 집계 ────────────────────────────────────────────────────
@@ -244,6 +246,14 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_s
     lines.append('🏫 오늘의 홍보학교')
     lines.append('\n'.join(todays_promos[:20]) if todays_promos else '(등록된 홍보학교가 없습니다)')
 
+    if group_sprouts:
+        lines.append('---------------------------')
+        lines.append(f'🍀 반별 떡잎 (목표 반당 {group_sprouts[0]["goal"]}개)')
+        for g in group_sprouts:
+            mark = '✅' if g['sprouts'] >= g['goal'] else '▫️'
+            leader = f"({g['leaderName']})" if g['leaderName'] else ''
+            lines.append(f"{mark} {g['name']}{leader} {g['sprouts']} / {g['goal']}")
+
     lines.append('---------------------------')
     lines.append('🍀 오늘의 잎사귀')
     lines.append('(등록된 잎사귀가 없습니다)')
@@ -304,7 +314,9 @@ def _build_message(client, region_code, date_str):
     offline_search = _fetch_offline_search(client, region_code, date_str)
     hjy_submissions = _fetch_habjaeyang_submissions(client, region_code, date_str)
     goals = load_team_goal_total(client, region_code)
-    return _build_text(region_code, date_str, reports, approvals, offline_search, hjy_submissions, districts, leaders, goals)
+    group_sprouts = group_sprout_status(client, [region_code])
+    return _build_text(region_code, date_str, reports, approvals, offline_search, hjy_submissions, districts, leaders, goals,
+                       group_sprouts)
 
 
 def refresh_team_stats_for_sarang(client, sarang_id, date_str=None):

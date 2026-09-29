@@ -383,8 +383,8 @@ def admin_groups_save(request, *args, **kwargs):
         group_id = uuid.uuid4().hex.upper()
         client.exec(
             """INSERT INTO DISTRICT_GROUPS (GROUP_ID, REGION_CODE, GROUP_NAME, DISTRICT_CODES, LEADER_MEMBER_ID, CREATED_BY, UPDATED_BY)
-               VALUES (:1, :2, :3, :4, :5, :6, :6)""",
-            [group_id, team_id, name, ','.join(area_ids), leader, author],
+               VALUES (:1, :2, :3, :4, :5, :6, :7)""",
+            [group_id, team_id, name, ','.join(area_ids), leader, author, author],
         )
     _sync_group_lead_position(client, [prev_leader, leader])
     return JsonResponse({'success': True, 'groupId': group_id, 'message': f'{name} 저장 완료'})

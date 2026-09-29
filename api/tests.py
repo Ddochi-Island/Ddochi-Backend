@@ -191,3 +191,26 @@ class GroupLeadScopeTests(SimpleTestCase):
         sql, args = _scope_sql({'position_code': 'group_lead', 'region_code': '3', 'district_code': None,
                                 'group_districts': []}, 'S')
         self.assertEqual(args, ['3', '__none__'])
+
+
+class SproutApprovalTests(SimpleTestCase):
+    FULL = {'gender': '남', 'age': '22', 'relation': 'x', 'phone': 'x', 'residence': 'x', 'school_major': 'x',
+            'personality': 'x', 'hobby': 'x', 'has_partner': 'x', 'family_relation': 'x', 'environment': 'x',
+            'desired_image': 'x', 'recent_concern': 'x', 'family_atmosphere': 'x', 'human_relations': 'x'}
+
+    def test_stage3_needs_approval_to_be_sprout(self):
+        from api.views.short_card import _journal_stage
+        self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': None}), '새싹')
+        self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'pending'}), '새싹')
+        self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'approved'}), '떡잎')
+        self.assertEqual(_journal_stage({**self.FULL, 'human_relations': None, 'sprout_status': 'approved'}), '새싹')
+
+    def test_who_can_decide_sprout(self):
+        from api.views.short_card import _can_decide_sprout
+        lead = {'position_code': 'group_lead', 'region_code': '3', 'group_districts': ['1', '2']}
+        self.assertTrue(_can_decide_sprout(lead, '3', '2'))
+        self.assertFalse(_can_decide_sprout(lead, '3', '4'))   # 다른 반 구역
+        self.assertFalse(_can_decide_sprout(lead, '5', '1'))   # 다른 지역
+        self.assertTrue(_can_decide_sprout({'position_code': 'team_evangelist', 'region_code': '3', 'group_districts': []}, '3', '4'))
+        self.assertFalse(_can_decide_sprout({'position_code': 'area_lead', 'region_code': '3', 'group_districts': []}, '3', '1'))
+        self.assertTrue(_can_decide_sprout({'position_code': 'admin', 'region_code': None, 'group_districts': []}, '6', '1'))
