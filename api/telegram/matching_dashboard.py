@@ -79,6 +79,7 @@ def _fetch_rows(client, team_id):
              JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
             WHERE s.STAGE NOT IN ('유입', '티엠')
+              AND hj.APPROVAL_STATUS = 'approved'  -- 레거시와 같이 재가된 건만(반려·대기는 매칭 절대 지켜에도 없어 결과 입력 불가)
               {region_clause}
               AND s.DELETED_AT IS NULL
               {scope_clause}
