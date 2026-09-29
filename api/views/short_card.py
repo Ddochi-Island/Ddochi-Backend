@@ -17,6 +17,8 @@ _RELIGIONS = {'무교', '기독교', '불교', '천주교', '기타'}
 _TIER_GLOBAL = {'admin', 'executive'}
 _TIER_REGION = {'team_lead', 'team_evangelist', 'region_lead',
                  'region_general_secretary', 'region_clerk', 'region_mission_clerk'}
+# 반장 — 자기가 맡은 반(DISTRICT_GROUPS.LEADER_MEMBER_ID)의 구역 전체. 전도팀장 아래, 구역장 위.
+_TIER_GROUP = {'group_lead'}
 _TIER_DISTRICT_ALL = {'area_lead'}
 _TIER_DISTRICT_GENERAL = {'sub_area_lead', 'team_clerk', 'team_mission_clerk', 'area_secretary'}
 
@@ -40,24 +42,43 @@ def _json_body(request):
         return {}
 
 
+def _tier_rank(code):
+    for rank, tier in enumerate((_TIER_GLOBAL, _TIER_REGION, _TIER_GROUP, _TIER_DISTRICT_ALL, _TIER_DISTRICT_GENERAL)):
+        if code in tier:
+            return rank
+    return 99
+
+
 def _caller_ctx(client, sabun):
-    """대표 POSITION_CODE + 소속 지역/구역 — admin_users.py의 SCOPE 우선순위 조회 패턴 재사용."""
-    row = client.query_one(
+    """대표 POSITION_CODE + 소속 지역/구역 + (반장이면) 맡은 반의 구역들.
+    겸직(예: 구역장+반장)이면 가장 넓은 밭 관리하기 티어의 직책을 대표로 씀 — 예전엔 SCOPE 순으로 하나만
+    골라서 같은 team 스코프끼리는 순서가 무작위였음."""
+    rows = client.query(
         """SELECT mah.REGION_CODE, mah.DISTRICT_CODE, mpm.POSITION_CODE
              FROM MEMBERS m
              LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
              LEFT JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = m.MEMBER_ID
-             LEFT JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
-            WHERE m.MEMBER_ID = :1
-            ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
-            FETCH FIRST 1 ROWS ONLY""",
+            WHERE m.MEMBER_ID = :1""",
         [sabun],
     )
-    return {
-        'position_code': row['position_code'] if row else None,
-        'region_code': row['region_code'] if row else None,
-        'district_code': row['district_code'] if row else None,
+    first = rows[0] if rows else {}
+    codes = [r['position_code'] for r in rows if r['position_code']]
+    ctx = {
+        'position_code': min(codes, key=_tier_rank) if codes else None,
+        'region_code': first.get('region_code'),
+        'district_code': first.get('district_code'),
+        'group_districts': [],
     }
+    if ctx['position_code'] in _TIER_GROUP:
+        groups = client.query(
+            "SELECT DISTRICT_CODES FROM DISTRICT_GROUPS WHERE LEADER_MEMBER_ID = :1 AND REGION_CODE = :2 AND DELETED_AT IS NULL",
+            [sabun, ctx['region_code']],
+        )
+        districts = {d.strip() for g in groups for d in (g['district_codes'] or '').split(',') if d.strip()}
+        if ctx['district_code']:
+            districts.add(ctx['district_code'])  # 반장도 자기 구역 소속 회원
+        ctx['group_districts'] = sorted(districts)
+    return ctx
 
 
 def _scope_sql(ctx, sabun):
@@ -69,6 +90,12 @@ def _scope_sql(ctx, sabun):
     if position_code in _TIER_REGION:
         return ("""sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
                      WHERE REGION_CODE = :1 AND IS_CURRENT = 1)""", [ctx['region_code']])
+    if position_code in _TIER_GROUP:
+        districts = ctx['group_districts'] or ['__none__']
+        marks = ', '.join(f':{i + 2}' for i in range(len(districts)))
+        return (f"""sc.MEMBER_ID IN (SELECT MEMBER_ID FROM MEMBER_AFFILIATION_HISTORIES
+                     WHERE REGION_CODE = :1 AND DISTRICT_CODE IN ({marks}) AND IS_CURRENT = 1)""",
+                [ctx['region_code'], *districts])
     if position_code in _TIER_DISTRICT_ALL:
         # DISTRICT_CODE는 지역마다 독립적으로 매겨져서(1~7이 전 지역에서 다 재사용됨)
         # REGION_CODE를 같이 안 걸면 다른 지역의 같은 번호 구역이 섞여 보임 —
@@ -214,6 +241,8 @@ def list_short_cards(request, *args, **kwargs):
         others_label = '전체의 밭'
     elif position_code in _TIER_REGION:
         others_label = '지역의 밭'
+    elif position_code in _TIER_GROUP:
+        others_label = '반의 밭'
     elif position_code in _TIER_DISTRICT_ALL or position_code in _TIER_DISTRICT_GENERAL:
         others_label = '구역의 밭'
     else:
@@ -301,6 +330,8 @@ def get_short_card_journal(request, *args, **kwargs):
         in_scope = True
     elif position_code in _TIER_REGION:
         in_scope = row['region_code'] == ctx['region_code']
+    elif position_code in _TIER_GROUP:
+        in_scope = row['region_code'] == ctx['region_code'] and row['district_code'] in ctx['group_districts']
     elif position_code in _TIER_DISTRICT_ALL:
         # DISTRICT_CODE는 지역마다 독립적으로 매겨짐(1~7이 전 지역에서 재사용) —
         # REGION_CODE도 같이 맞아야 진짜 같은 구역(_scope_sql과 동일 이유로 수정).

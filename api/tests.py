@@ -170,3 +170,24 @@ class TruncTests(SimpleTestCase):
     def test_etc_allows_1000_korean_chars(self):
         from api.views.assets import _trunc_chars
         self.assertEqual(len(_trunc_chars('가' * 1200, 1000)), 1000)
+
+
+class GroupLeadScopeTests(SimpleTestCase):
+    def test_widest_tier_wins_for_concurrent_positions(self):
+        from api.views.short_card import _tier_rank
+        self.assertEqual(min(['area_lead', 'group_lead'], key=_tier_rank), 'group_lead')
+        self.assertEqual(min(['group_lead', 'team_evangelist'], key=_tier_rank), 'team_evangelist')
+        self.assertEqual(min(['general', 'sub_area_lead'], key=_tier_rank), 'sub_area_lead')
+
+    def test_group_scope_covers_group_districts(self):
+        from api.views.short_card import _scope_sql
+        sql, args = _scope_sql({'position_code': 'group_lead', 'region_code': '3', 'district_code': '2',
+                                'group_districts': ['1', '2', '3']}, 'S')
+        self.assertIn('DISTRICT_CODE IN (:2, :3, :4)', sql)
+        self.assertEqual(args, ['3', '1', '2', '3'])
+
+    def test_group_lead_without_group_sees_nothing_extra(self):
+        from api.views.short_card import _scope_sql
+        sql, args = _scope_sql({'position_code': 'group_lead', 'region_code': '3', 'district_code': None,
+                                'group_districts': []}, 'S')
+        self.assertEqual(args, ['3', '__none__'])

@@ -4,6 +4,7 @@
 # area_id를 이름 자리에도 그대로 씀(teams.py의 get_teams와 동일 관례).
 import json
 import re
+import uuid
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -272,3 +273,140 @@ def admin_users_swap_teams(request, *args, **kwargs):
                 [team_id, broadcast_type, config_json, team_id, broadcast_type, config_json],
             )
     return JsonResponse({'success': True, 'message': f'{team_id1} ↔ {team_id2} 스왑 완료'})
+
+
+# ── 반(구역 묶음) 관리 ────────────────────────────────────────────────
+# 반장의 실제 범위는 DISTRICT_GROUPS.LEADER_MEMBER_ID 기준, MEMBER_POSITION_MAPPINGS의 group_lead 행은
+# 표시/겸직용이라 반장을 지정·해제할 때마다 _sync_group_lead_position으로 맞춰줌.
+
+def _is_admin(client, request):
+    return request.user.get('adminUnlocked') or client.query_one(
+        """SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS mpm JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+            WHERE mpm.MEMBER_ID = :1 AND pc.SCOPE = 'global'""",
+        [request.user['sabun']],
+    )
+
+
+def _sync_group_lead_position(client, member_ids):
+    for mid in {m for m in member_ids if m}:
+        leads = client.query_one(
+            "SELECT 1 AS OK FROM DISTRICT_GROUPS WHERE LEADER_MEMBER_ID = :1 AND DELETED_AT IS NULL", [mid],
+        )
+        has = client.query_one(
+            "SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'group_lead'", [mid],
+        )
+        if leads and not has:
+            client.exec(
+                "INSERT INTO MEMBER_POSITION_MAPPINGS (MEMBER_ID, POSITION_CODE, ASSIGNED_AT) VALUES (:1, 'group_lead', SYSDATE)",
+                [mid],
+            )
+        elif has and not leads:
+            client.exec("DELETE FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'group_lead'", [mid])
+
+
+@csrf_exempt
+@require_jwt
+def admin_groups_list(request, *args, **kwargs):
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    client = DataRouterClient()
+    if not _is_admin(client, request):
+        return JsonResponse({'success': False, 'message': '관리자만 반을 관리할 수 있어'}, status=403)
+    team_id = str(_json_body(request).get('teamId') or '').strip()
+    sql = """SELECT g.GROUP_ID, g.REGION_CODE, g.GROUP_NAME, g.DISTRICT_CODES, g.LEADER_MEMBER_ID, m.NAME AS LEADER_NAME
+               FROM DISTRICT_GROUPS g LEFT JOIN MEMBERS m ON m.MEMBER_ID = g.LEADER_MEMBER_ID
+              WHERE g.DELETED_AT IS NULL"""
+    args = []
+    if team_id:
+        sql += " AND g.REGION_CODE = :1"
+        args.append(team_id)
+    rows = client.query(sql + " ORDER BY g.REGION_CODE, g.GROUP_NAME", args)
+    return JsonResponse({'success': True, 'list': [{
+        'groupId': r['group_id'], 'teamId': r['region_code'], 'name': r['group_name'],
+        'areaIds': [d for d in (r['district_codes'] or '').split(',') if d],
+        'leaderSabun': r['leader_member_id'], 'leaderName': r['leader_name'],
+    } for r in rows]})
+
+
+@csrf_exempt
+@require_jwt
+def admin_groups_save(request, *args, **kwargs):
+    """반 추가/수정. groupId가 있으면 수정. 한 구역은 한 반에만 들어가게 막음."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    client = DataRouterClient()
+    if not _is_admin(client, request):
+        return JsonResponse({'success': False, 'message': '관리자만 반을 관리할 수 있어'}, status=403)
+
+    body = _json_body(request)
+    group_id = str(body.get('groupId') or '').strip()
+    team_id = str(body.get('teamId') or '').strip()
+    name = str(body.get('name') or '').strip()
+    area_ids = sorted({str(a).strip() for a in (body.get('areaIds') or []) if str(a).strip()},
+                      key=lambda a: (not a.isdigit(), int(a) if a.isdigit() else 0, a))
+    leader = str(body.get('leaderSabun') or '').strip() or None
+    if not team_id or not name or not area_ids:
+        return JsonResponse({'success': False, 'message': '지역/반 이름/구역은 필수야'}, status=400)
+
+    taken = client.query(
+        "SELECT GROUP_ID, GROUP_NAME, DISTRICT_CODES FROM DISTRICT_GROUPS WHERE REGION_CODE = :1 AND DELETED_AT IS NULL",
+        [team_id],
+    )
+    for g in taken:
+        if g['group_id'] == group_id:
+            continue
+        dup = set(area_ids) & {d for d in (g['district_codes'] or '').split(',') if d}
+        if dup:
+            return JsonResponse({'success': False, 'message': f"{', '.join(sorted(dup))}구역은 이미 {g['group_name']}에 있어"}, status=400)
+    if leader:
+        mah = client.query_one(
+            "SELECT REGION_CODE FROM MEMBER_AFFILIATION_HISTORIES WHERE MEMBER_ID = :1 AND IS_CURRENT = 1", [leader],
+        )
+        if not mah or mah['region_code'] != team_id:
+            return JsonResponse({'success': False, 'message': '반장은 같은 지역 회원이어야 해'}, status=400)
+
+    author = request.user['sabun']
+    prev_leader = None
+    if group_id:
+        cur = client.query_one(
+            "SELECT LEADER_MEMBER_ID FROM DISTRICT_GROUPS WHERE GROUP_ID = :1 AND DELETED_AT IS NULL", [group_id],
+        )
+        if not cur:
+            return JsonResponse({'success': False, 'message': '반을 찾을 수 없어'}, status=404)
+        prev_leader = cur['leader_member_id']
+        client.exec(
+            """UPDATE DISTRICT_GROUPS SET REGION_CODE = :1, GROUP_NAME = :2, DISTRICT_CODES = :3, LEADER_MEMBER_ID = :4,
+                      UPDATED_AT = SYSTIMESTAMP, UPDATED_BY = :5 WHERE GROUP_ID = :6""",
+            [team_id, name, ','.join(area_ids), leader, author, group_id],
+        )
+    else:
+        group_id = uuid.uuid4().hex.upper()
+        client.exec(
+            """INSERT INTO DISTRICT_GROUPS (GROUP_ID, REGION_CODE, GROUP_NAME, DISTRICT_CODES, LEADER_MEMBER_ID, CREATED_BY, UPDATED_BY)
+               VALUES (:1, :2, :3, :4, :5, :6, :6)""",
+            [group_id, team_id, name, ','.join(area_ids), leader, author],
+        )
+    _sync_group_lead_position(client, [prev_leader, leader])
+    return JsonResponse({'success': True, 'groupId': group_id, 'message': f'{name} 저장 완료'})
+
+
+@csrf_exempt
+@require_jwt
+def admin_groups_delete(request, *args, **kwargs):
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    client = DataRouterClient()
+    if not _is_admin(client, request):
+        return JsonResponse({'success': False, 'message': '관리자만 반을 관리할 수 있어'}, status=403)
+    group_id = str(_json_body(request).get('groupId') or '').strip()
+    cur = client.query_one(
+        "SELECT GROUP_NAME, LEADER_MEMBER_ID FROM DISTRICT_GROUPS WHERE GROUP_ID = :1 AND DELETED_AT IS NULL", [group_id],
+    )
+    if not cur:
+        return JsonResponse({'success': False, 'message': '반을 찾을 수 없어'}, status=404)
+    client.exec(
+        "UPDATE DISTRICT_GROUPS SET DELETED_AT = SYSTIMESTAMP, UPDATED_BY = :1 WHERE GROUP_ID = :2",
+        [request.user['sabun'], group_id],
+    )
+    _sync_group_lead_position(client, [cur['leader_member_id']])
+    return JsonResponse({'success': True, 'message': f"{cur['group_name']} 삭제 완료"})
