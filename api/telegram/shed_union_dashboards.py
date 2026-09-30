@@ -433,30 +433,54 @@ def send_fresh_shed_tm(client, group):
 
 # ── 3. 예약타임테이블 ──────────────────────────────────────────────────
 def _fetch_reservations(client, regions):
+    """티엠 예약 목록 — 레거시 shedScheduleDashboard처럼 "최신 TM 통화 예약이 있으면 그것, 없으면 shed 이관 때
+    잡은 예약 시각". 전엔 TM 통화 예약(TM_LOGS)만 봐서 이관 예약이 전부 빠졌음 — 135는 통화 예약이 0건이라
+    판이 통째로 비어 보였음(2026-09-30 신고). 아직 이관받기 전(SARANG_INTAKE_QUEUE)인 예약도 레거시처럼 포함.
+    대상은 아직 티엠 단계(유입/티엠)인 사람만. 예약 시각 컬럼들은 KST 벽시계 값이 +00:00으로 저장돼 있어
+    시간대 변환 없이 그대로 표시함(기존 표시와 동일)."""
     if not regions:
         return []
     placeholders, values = _in_clause(regions, start=1)
-    return client.query(
-        f"""SELECT * FROM (
-              SELECT spi.NAME AS PI_NAME, mah.REGION_CODE, im.NAME AS INTRODUCER_NAME, cm.NAME AS CALLER_NAME,
-                     TO_CHAR(tl.RESERVED_TM_AT, 'YYYY-MM-DD') AS RES_DATE,
-                     TO_CHAR(tl.RESERVED_TM_AT, 'HH24:MI') AS RES_TIME,
-                     ROW_NUMBER() OVER (PARTITION BY s.SARANG_ID ORDER BY tl.CREATED_AT DESC) AS RN
-                FROM TM_LOGS tl
-                JOIN SARANG s ON s.SARANG_ID = tl.SARANG_ID
-                JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
-                JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
-                JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-                LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
-                LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
-               WHERE tl.RESULT = 'RESERVED_TM'
-                 AND tl.RESERVED_TM_AT IS NOT NULL
-                 AND tl.RESERVED_TM_AT >= SYSTIMESTAMP - INTERVAL '3' DAY
-                 AND mah.REGION_CODE IN ({placeholders})
-            ) WHERE RN = 1
-            ORDER BY RES_DATE NULLS LAST, RES_TIME""",
+    rows = client.query(
+        f"""SELECT s.SARANG_ID, spi.NAME AS PI_NAME, mah.REGION_CODE, im.NAME AS INTRODUCER_NAME, cm.NAME AS CALLER_NAME,
+                   TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'YYYY-MM-DD') AS RES_DATE,
+                   TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'HH24:MI') AS RES_TIME
+              FROM SARANG s
+              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+              JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+              LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
+              LEFT JOIN (
+                SELECT SARANG_ID, RESERVED_TM_AT, CALLER_MEMBER_ID,
+                       ROW_NUMBER() OVER (PARTITION BY SARANG_ID ORDER BY CREATED_AT DESC) AS RN
+                  FROM TM_LOGS WHERE RESULT = 'RESERVED_TM' AND RESERVED_TM_AT IS NOT NULL
+              ) tl ON tl.SARANG_ID = s.SARANG_ID AND tl.RN = 1
+              LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
+             WHERE s.DELETED_AT IS NULL
+               AND s.STAGE IN ('유입', '티엠')
+               AND COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT) >= SYSTIMESTAMP - INTERVAL '3' DAY
+               AND mah.REGION_CODE IN ({placeholders})""",
         values,
     )
+    # 이관받기 대기 중 — 아직 SARANG이 없어 지역 대신 유입 링크 번호(135=1/3/5, 246=2/4/6)로 묶음
+    link_marks, link_values = _in_clause([int(r) for r in regions if str(r).isdigit()], start=1)
+    if link_values:
+        queued = client.query(
+            f"""SELECT q.NAME AS PI_NAME, TO_CHAR(q.SOURCE_LINK) AS REGION_CODE, im.NAME AS INTRODUCER_NAME,
+                       NULL AS CALLER_NAME,
+                       TO_CHAR(q.TM_RESERVED_AT, 'YYYY-MM-DD') AS RES_DATE, TO_CHAR(q.TM_RESERVED_AT, 'HH24:MI') AS RES_TIME
+                  FROM SARANG_INTAKE_QUEUE q
+                  LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
+                 WHERE q.STATUS IN ('pending', 'submitted')
+                   AND q.TM_RESERVED_AT >= SYSTIMESTAMP - INTERVAL '3' DAY
+                   AND q.SOURCE_LINK IN ({link_marks})""",
+            link_values,
+        )
+        for q in queued:
+            q['pi_name'] = f"{q['pi_name']}(이관 대기)"
+        rows += queued
+    rows.sort(key=lambda r: (r['res_date'] or '9999', r['res_time'] or ''))
+    return rows
 
 
 def _fetch_pending_count(client, regions):
