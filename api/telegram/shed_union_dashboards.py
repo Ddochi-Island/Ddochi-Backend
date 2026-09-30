@@ -484,19 +484,15 @@ def _fetch_reservations(client, regions):
 
 
 def _fetch_pending_count(client, regions):
-    if not regions:
+    """번호찾 미재가 = shed에서 넘어와 아직 이관받지 않은 건(레거시 NUMBER_STATUS pending 대응).
+    SARANG이 아직 없어 유입 링크 번호(135=1/3/5, 246=2/4/6)로 묶음."""
+    link_marks, link_values = _in_clause([int(r) for r in regions if str(r).isdigit()], start=1)
+    if not link_values:
         return 0
-    placeholders, values = _in_clause(regions, start=1)
     row = client.query_one(
-        f"""SELECT COUNT(*) AS CNT
-              FROM SARANG s
-              JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
-              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
-             WHERE s.STAGE NOT IN ('재가')
-               AND s.DELETED_AT IS NULL
-               AND s.INFLOW_DATE > SYSDATE - 30
-               AND mah.REGION_CODE IN ({placeholders})""",
-        values,
+        f"""SELECT COUNT(*) AS CNT FROM SARANG_INTAKE_QUEUE
+             WHERE STATUS IN ('pending', 'submitted') AND SOURCE_LINK IN ({link_marks})""",
+        link_values,
     )
     return int(row['cnt']) if row else 0
 
