@@ -255,4 +255,10 @@ def refresh_matching_dashboard_for_sarang(client, sarang_id):
     )
     if not row or not row['team_id']:
         return {'skipped': True, 'reason': 'team_missing'}
-    return refresh_matching_dashboard(client, row['team_id'], allow_create=True)
+    result = refresh_matching_dashboard(client, row['team_id'], allow_create=True)
+    # 수지역(전 지역) 보드도 같은 사랑이를 보여주므로 함께 수정 — 새 메시지는 정각 크론에 맡기고 기존 메시지만 edit
+    try:
+        refresh_matching_dashboard(client, _ALL_REGIONS_TEAM_ID, allow_create=False)
+    except Exception:
+        logger.warning('[matching_dashboard] 수지역 refresh failed', exc_info=True)
+    return result
