@@ -7,8 +7,15 @@ from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import send_fresh_matching_dashboard
 from api.telegram.prospect_dashboard import send_fresh_prospect_dashboard
 from api.telegram.shed_union_dashboards import send_fresh_shed_sched, send_fresh_shed_tm, send_fresh_shed_unified
-from api.telegram.team_config import list_prospect_chat_team_ids, list_stats_chat_team_ids
+from api.telegram.team_config import cron_job_enabled, list_prospect_chat_team_ids, list_stats_chat_team_ids, load_team_config
 from api.telegram.team_stats import send_fresh_team_stats
+
+
+def _send_shed_job(send_fn, group, handler):
+    client = DataRouterClient()
+    if not cron_job_enabled(load_team_config(client, f'{group} 연합'), handler):
+        return {'sent': False, 'skipped': 'disabled'}
+    return send_fn(client, group)
 
 
 @csrf_exempt
@@ -37,7 +44,7 @@ def send_stats(request, *args, **kwargs):
 
     client = DataRouterClient()
     results = {}
-    for team_id in list_stats_chat_team_ids(client):
+    for team_id in list_stats_chat_team_ids(client, 'sendStats'):
         try:
             results[team_id] = send_fresh_team_stats(client, team_id)
         except Exception as e:
@@ -113,7 +120,7 @@ def send_prospect_dashboard(request, *args, **kwargs):
 
     client = DataRouterClient()
     results = {}
-    for team_id in list_prospect_chat_team_ids(client):
+    for team_id in list_prospect_chat_team_ids(client, 'sendProspectDashboard'):
         try:
             results[team_id] = send_fresh_prospect_dashboard(client, team_id)
         except Exception as e:
@@ -148,7 +155,7 @@ def send_matching_dashboard(request, *args, **kwargs):
 
     client = DataRouterClient()
     results = {}
-    for team_id in list_prospect_chat_team_ids(client):
+    for team_id in list_prospect_chat_team_ids(client, 'sendMatchingDashboard'):
         try:
             results[team_id] = send_fresh_matching_dashboard(client, team_id)
         except Exception as e:
@@ -243,7 +250,7 @@ def send_shed_unified_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    result = send_fresh_shed_unified(DataRouterClient(), '135')
+    result = _send_shed_job(send_fresh_shed_unified, '135', 'sendShedUnifiedDashboard')
     return JsonResponse({'success': True, 'result': result})
 
 
@@ -262,7 +269,7 @@ def send_shed_tm_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    result = send_fresh_shed_tm(DataRouterClient(), '135')
+    result = _send_shed_job(send_fresh_shed_tm, '135', 'sendShedTmDashboard')
     return JsonResponse({'success': True, 'result': result})
 
 
@@ -281,7 +288,7 @@ def send_shed_sched_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    result = send_fresh_shed_sched(DataRouterClient(), '135')
+    result = _send_shed_job(send_fresh_shed_sched, '135', 'sendShedSchedDashboard')
     return JsonResponse({'success': True, 'result': result})
 
 
@@ -300,7 +307,7 @@ def send_shed_246_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    result = send_fresh_shed_unified(DataRouterClient(), '246')
+    result = _send_shed_job(send_fresh_shed_unified, '246', 'sendShed246Dashboard')
     return JsonResponse({'success': True, 'result': result})
 
 
@@ -319,7 +326,7 @@ def send_shed_246_tm_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    result = send_fresh_shed_tm(DataRouterClient(), '246')
+    result = _send_shed_job(send_fresh_shed_tm, '246', 'sendShed246TmDashboard')
     return JsonResponse({'success': True, 'result': result})
 
 
@@ -338,7 +345,7 @@ def send_shed_246_sched_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    result = send_fresh_shed_sched(DataRouterClient(), '246')
+    result = _send_shed_job(send_fresh_shed_sched, '246', 'sendShed246SchedDashboard')
     return JsonResponse({'success': True, 'result': result})
 
 

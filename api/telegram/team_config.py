@@ -37,8 +37,14 @@ def patch_team_config(client, team_id, patch, author):
     )
 
 
-def list_prospect_chat_team_ids(client):
-    """prospectChatId(또는 matchingChatId)가 설정된 팀 목록 — 정각 크론이 순회할 대상."""
+def cron_job_enabled(cfg, handler):
+    """텔레그램 설정 화면의 발송 잡 토글(CONFIG.cronJobs) — 끈 적 없으면 켜진 것으로 봄."""
+    return (cfg.get('cronJobs') or {}).get(handler) is not False
+
+
+def list_prospect_chat_team_ids(client, handler=None):
+    """prospectChatId(또는 matchingChatId)가 설정된 팀 목록 — 정각 크론이 순회할 대상.
+    handler를 주면 그 잡을 꺼둔 팀은 뺌."""
     rows = client.query(
         "SELECT TEAM_ID, CONFIG FROM BROADCAST_SETTINGS WHERE BROADCAST_TYPE = :1 AND DELETED_AT IS NULL",
         [BROADCAST_TYPE],
@@ -49,13 +55,13 @@ def list_prospect_chat_team_ids(client):
             cfg = json.loads(r['config']) if r['config'] else {}
         except (TypeError, ValueError):
             cfg = {}
-        if cfg.get('prospectChatId') or cfg.get('matchingChatId'):
+        if (cfg.get('prospectChatId') or cfg.get('matchingChatId')) and (not handler or cron_job_enabled(cfg, handler)):
             out.append(r['team_id'])
     return out
 
 
-def list_stats_chat_team_ids(client):
-    """statsChatId(일일보고 방)가 설정된 팀 목록 — 정각 크론이 순회할 대상."""
+def list_stats_chat_team_ids(client, handler=None):
+    """statsChatId(일일보고 방)가 설정된 팀 목록 — 정각 크론이 순회할 대상. handler는 위와 같음."""
     rows = client.query(
         "SELECT TEAM_ID, CONFIG FROM BROADCAST_SETTINGS WHERE BROADCAST_TYPE = :1 AND DELETED_AT IS NULL",
         [BROADCAST_TYPE],
@@ -66,7 +72,7 @@ def list_stats_chat_team_ids(client):
             cfg = json.loads(r['config']) if r['config'] else {}
         except (TypeError, ValueError):
             cfg = {}
-        if cfg.get('statsChatId'):
+        if cfg.get('statsChatId') and (not handler or cron_job_enabled(cfg, handler)):
             out.append(r['team_id'])
     return out
 

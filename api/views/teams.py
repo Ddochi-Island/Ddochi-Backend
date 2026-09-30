@@ -7,7 +7,8 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import require_jwt
 from api.clients.data_router import DataRouterClient
-from api.telegram.team_config import load_all_team_configs, load_team_config
+from api.telegram.team_config import BROADCAST_TYPE, load_all_team_configs, load_team_config, patch_team_config
+from api.views.admin_users import _is_admin
 from api.telegram.team_goals import area_key
 
 
@@ -327,19 +328,43 @@ def link_telegram_user(request, *args, **kwargs):
 
 
 @csrf_exempt
+@require_jwt
 def get_team_cron_config(request, *args, **kwargs):
-    # TODO: services/main/src/routes/teams.js 의 POST /get-team-cron-config 포팅
+    """텔레그램 설정 화면의 팀별 발송 잡 ON/OFF — BROADCAST_SETTINGS.CONFIG.cronJobs. 레거시처럼 관리자만."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/teams.js"}, status=501)
+    client = DataRouterClient()
+    if not _is_admin(client, request):
+        return JsonResponse({'success': False, 'message': 'admin only'}, status=403)
+    rows = client.query(
+        "SELECT TEAM_ID, CONFIG FROM BROADCAST_SETTINGS WHERE BROADCAST_TYPE = :1 AND DELETED_AT IS NULL",
+        [BROADCAST_TYPE],
+    )
+    teams = {}
+    for r in rows:
+        try:
+            cfg = json.loads(r['config']) if r['config'] else {}
+        except (TypeError, ValueError):
+            cfg = {}
+        teams[r['team_id']] = {'name': r['team_id'], 'cronJobs': cfg.get('cronJobs') or {}}
+    return JsonResponse({'success': True, 'teams': teams})
 
 
 @csrf_exempt
+@require_jwt
 def set_team_cron_job(request, *args, **kwargs):
-    # TODO: services/main/src/routes/teams.js 의 POST /set-team-cron-job 포팅
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/teams.js"}, status=501)
+    client = DataRouterClient()
+    if not _is_admin(client, request):
+        return JsonResponse({'success': False, 'message': 'admin only'}, status=403)
+    body = _json_body(request)
+    team_id = str(body.get('teamId') or '').strip()
+    handler = str(body.get('handler') or '').strip()
+    if not team_id or not handler:
+        return JsonResponse({'success': False, 'message': 'teamId, handler 필요'}, status=400)
+    patch_team_config(client, team_id, {'cronJobs': {handler: body.get('enabled') is not False}}, request.user['sabun'])
+    return JsonResponse({'success': True})
 
 
 @csrf_exempt
