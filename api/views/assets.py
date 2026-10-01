@@ -1434,7 +1434,9 @@ def get_shed_prospects(request, *args, **kwargs):
         """SELECT s.SARANG_ID, s.STAGE, s.CURRENT_PROCESS, s.AGE, s.MBTI,
                   s.RECRUITMENT_TYPE, s.INFLOW_DATE, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
-                  m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
+                  m.NAME AS INFLOW_MEMBER_NAME,
+                  -- 지역은 유입자(shed에서 찾은 사람) 소속 기준(레거시와 동일) — 이관받기 누른 담당자는 다른 지역일 수 있음
+                  COALESCE(imah.REGION_CODE, mah.REGION_CODE) AS TEAM,
                   sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV,
                   im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS,
                   -- 가장 최근 '티엠예약' 통화 기록의 예약 시각 우선, 없으면 shed 이관 때 잡은 예약 시각
@@ -1451,6 +1453,7 @@ def get_shed_prospects(request, *args, **kwargs):
                ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
              JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES imah ON imah.MEMBER_ID = sid.INTRODUCER_MEMBER_ID AND imah.IS_CURRENT = 1
              LEFT JOIN SARANG_HAB_JAE_YANG shjy ON shjy.SARANG_ID = s.SARANG_ID AND shjy.IS_ACTIVE = 1
              LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = shjy.GUIDE_MEMBER_ID
              LEFT JOIN MEMBERS cm  ON cm.MEMBER_ID  = shjy.CALLER_MEMBER_ID
