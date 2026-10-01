@@ -1436,7 +1436,12 @@ def get_shed_prospects(request, *args, **kwargs):
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
                   sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV,
-                  im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS, sid.TM_RESERVED_AT,
+                  im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS,
+                  -- 가장 최근 '티엠예약' 통화 기록의 예약 시각 우선, 없으면 shed 이관 때 잡은 예약 시각
+                  COALESCE((SELECT MAX(tl.RESERVED_TM_AT) KEEP (DENSE_RANK LAST ORDER BY tl.CREATED_AT)
+                              FROM TM_LOGS tl
+                             WHERE tl.SARANG_ID = s.SARANG_ID AND tl.RESULT = 'RESERVED_TM' AND tl.RESERVED_TM_AT IS NOT NULL),
+                           sid.TM_RESERVED_AT) AS TM_RESERVED_AT,
                   shjy.HAB_JAE_YANG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
              FROM SARANG s
