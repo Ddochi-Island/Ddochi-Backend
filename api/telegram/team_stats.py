@@ -95,7 +95,7 @@ def _fetch_approvals(client, region_code, date_str):
                FROM SARANG_ACTIVITY_LOGS al
                JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
                JOIN MEMBER_AFFILIATION_HISTORIES mah
-                 ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+                 ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
               WHERE al.EVENT_TYPE = '재가처리'
                 AND mah.REGION_CODE = :1
                 AND TRUNC(al.CREATED_AT) = TO_DATE(:2, 'YYYY-MM-DD')
@@ -114,7 +114,7 @@ def _fetch_habjaeyang_submissions(client, region_code, date_str):
                FROM SARANG_ACTIVITY_LOGS al
                JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID
                JOIN MEMBER_AFFILIATION_HISTORIES mah
-                 ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+                 ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
               WHERE al.EVENT_TYPE = '합재양작성'
                 AND mah.REGION_CODE = :1
                 AND TRUNC(al.CREATED_AT) = TO_DATE(:2, 'YYYY-MM-DD')
@@ -131,7 +131,7 @@ def _fetch_offline_search(client, region_code, date_str):
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
              JOIN MEMBER_AFFILIATION_HISTORIES mah
-               ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+               ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
             WHERE mah.REGION_CODE = :1
               AND TRUNC(s.INFLOW_DATE) = TO_DATE(:2, 'YYYY-MM-DD')
@@ -326,7 +326,7 @@ def refresh_team_stats_for_sarang(client, sarang_id, date_str=None):
         """SELECT mah.REGION_CODE
              FROM SARANG s
              JOIN MEMBER_AFFILIATION_HISTORIES mah
-               ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+               ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
             WHERE s.SARANG_ID = :1""",
         [sarang_id],
     )

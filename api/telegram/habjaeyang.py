@@ -81,7 +81,7 @@ def _fetch(client, sarang_id):
              LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = hj.GUIDE_MEMBER_ID
              LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = hj.CALLER_MEMBER_ID
              LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
-               ON mah.MEMBER_ID = s.INFLOW_MEMBER_ID AND mah.IS_CURRENT = 1
+               ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
             WHERE s.SARANG_ID = :1""",
         [sarang_id],
     )
