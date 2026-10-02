@@ -170,6 +170,13 @@ def send_habjaeyang_to_telegram(client, sarang_id, refresh_dashboard=True):
         return {'skipped': True, 'reason': 'no_chat_id'}
 
     text = _build_text(row)
+    if len(text) > 4000:
+        # 텔레그램 한도 4096자 — 넘으면 카드가 통째로 거부되니 끝을 자름. 이스케이프 엔티티(&lt; 등) 중간에서 끊기면 그 조각도 버림
+        text = text[:3990]
+        amp = text.rfind('&')
+        if amp != -1 and ';' not in text[amp:]:
+            text = text[:amp]
+        text += '\n…(길어서 생략, 앱에서 전체 보기)'
     keyboard = build_hj_keyboard(
         sarang_id, settings.TG_CALLBACK_HMAC_SECRET, chat_id,
         row['has_replied'] == '1', row['is_window_opened'] == '1', row['approval_status'] or '',
