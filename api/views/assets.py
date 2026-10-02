@@ -151,7 +151,7 @@ def get_assets(request, *args, **kwargs):
         """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.GENDER, s.MBTI, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   im.NAME AS MANAGER_NAME,
-                  hj.HAB_JAE_YANG_ID,
+                  hj.HAB_JAE_YANG_ID, hj.ROUTE, hj.TOOL,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
                   hj.MATCH_LOCATION, hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y,
@@ -301,6 +301,8 @@ def get_assets(request, *args, **kwargs):
                 'subName': r['name'] or '',
                 'guide': r['guide_name'] or '',
                 'tmName': r['caller_name'] or '',
+                'route': r['route'] or '',
+                'tool': r['tool'] or '',
                 'gender': r['gender'] or '',
                 # 재가 이후엔 SARANG_MATCH_HISTORIES의 최신 시도(밀림/2차만남으로 갱신된
                 # 최신 일정)가 있으면 그걸 우선 — 없으면(재가 전) 합재양 최초 일정.
@@ -904,6 +906,12 @@ def edit_match(request, *args, **kwargs):
                 WHERE PERSONAL_INFO_ID = (SELECT PERSONAL_INFO_ID FROM SARANG WHERE SARANG_ID = :3)""",
             [phone, phone_digits, sarang_id],
         )
+    elif edit_type in ('path', 'tool'):
+        # 합재양의 섭외경로/섭외도구 — 수정 화면의 select(작성 폼과 같은 선택지)
+        client.exec(
+            f"UPDATE SARANG_HAB_JAE_YANG SET {'ROUTE' if edit_type == 'path' else 'TOOL'} = :1 WHERE SARANG_ID = :2 AND IS_ACTIVE = 1",
+            [_trunc_chars(str(value or '').strip() or None, 50), sarang_id],
+        )
     else:
         return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'})
 
@@ -913,7 +921,7 @@ def edit_match(request, *args, **kwargs):
         except Exception:
             logging.getLogger('api.views.assets').warning('[edit_match] matching dashboard refresh failed', exc_info=True)
 
-    if edit_type in ('date', 'subGuide', 'gender', 'age', 'residence', 'phone'):
+    if edit_type in ('date', 'subGuide', 'gender', 'age', 'residence', 'phone', 'path', 'tool'):
         # 이 필드들은 찾기현황판 채팅방에 올라간 개별 합재양 카드 본문에도 그대로
         # 나오는데(이름/성별/나이/연락처/거주지/매칭일시), 여기서 갱신 안 하면 카드는
         # 수정 전 값으로 영영 고정되고 찾기현황판 목록(항상 최신 DB에서 다시 그림)만
