@@ -1744,6 +1744,9 @@ def _intake_people(client, body):
     return introducer_id, ', '.join(helper_ids) or None
 
 
+_shed_log = logging.getLogger('api.views.assets')
+
+
 @csrf_exempt
 def shed_webhook(request, *args, **kwargs):
     """shed 프로젝트(Google Apps Script 경유)가 호출.
@@ -1757,6 +1760,7 @@ def shed_webhook(request, *args, **kwargs):
 
     shed_key = settings.SHED_INTERNAL_KEY
     if not shed_key or request.headers.get('X-Shed-Key') != shed_key:
+        _shed_log.warning('[shed_webhook] 401 key mismatch')
         return JsonResponse({'ok': False}, status=401)
 
     body = _json_body(request)
@@ -1782,6 +1786,7 @@ def shed_webhook(request, *args, **kwargs):
             [env, reaction, introducer_id, tm_location, helper_ids_str, tm_datetime, tm_datetime, intake_id],
         )
         if not affected:
+            _shed_log.warning('[shed_webhook] update target missing rowNum=%s', intake_id)
             return JsonResponse({'ok': False, 'message': '대상을 찾을 수 없거나 이미 처리됨'}, status=400)
         return JsonResponse({'ok': True})
 
@@ -1802,8 +1807,10 @@ def shed_webhook(request, *args, **kwargs):
     mbti = str(body.get('mbti') or '').strip() or None
 
     if not name or len(phone_normalized) < 10:
+        _shed_log.warning('[shed_webhook] 400 name=%r phone_digits=%d', name, len(phone_normalized))
         return JsonResponse({'ok': False, 'message': '이름/전화번호 필요'}, status=400)
     if event not in ['1', '2', '3', '4', '5', '6']:
+        _shed_log.warning('[shed_webhook] 400 name=%r event=%r', name, event)
         return JsonResponse({'ok': False, 'message': '링크 번호 오류'}, status=400)
 
     client = DataRouterClient()
@@ -1813,6 +1820,7 @@ def shed_webhook(request, *args, **kwargs):
         [phone_normalized],
     )
     if existing:
+        _shed_log.warning('[shed_webhook] skipped duplicate phone name=%r existing=%s', name, existing['intake_id'])
         return JsonResponse({'ok': True, 'skipped': True})
 
     # 현재 라이브 GAS(Code.gs)는 신청 때는 시트에만 저장하고, shed 관리자가 "이관하기"를 누를 때
