@@ -1,10 +1,12 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
+import datetime
 import hashlib
 import json
 import logging
 import re
 import time
 import uuid
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -1750,6 +1752,13 @@ _shed_log = logging.getLogger('api.views.assets')
 def _shed_tm_datetime(v):
     """TO_TIMESTAMP 'YYYY-MM-DD"T"HH24:MI'에 맞춤 — 초/공백 구분('2026-10-03 19:00:00')이 오면 ORA-01830으로 500 났음."""
     v = str(v or '').strip().replace(' ', 'T')
+    if v.endswith('Z') or '+' in v[10:]:
+        # GAS가 시트 날짜 셀을 다시 읽어 보내면 UTC ISO('...T10:00:00.000Z')로 옴 — KST 벽시계로 바꿔야 9시간 안 밀림
+        try:
+            dt = datetime.datetime.fromisoformat(v.replace('Z', '+00:00'))
+            return dt.astimezone(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%dT%H:%M')
+        except ValueError:
+            pass
     if len(v) >= 16 and v[10] == 'T':
         return v[:16]
     return v[:10] or None
