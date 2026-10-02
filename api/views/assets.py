@@ -1747,8 +1747,24 @@ def _intake_people(client, body):
 _shed_log = logging.getLogger('api.views.assets')
 
 
+def _shed_tm_datetime(v):
+    """TO_TIMESTAMP 'YYYY-MM-DD"T"HH24:MI'에 맞춤 — 초/공백 구분('2026-10-03 19:00:00')이 오면 ORA-01830으로 500 났음."""
+    v = str(v or '').strip().replace(' ', 'T')
+    if len(v) >= 16 and v[10] == 'T':
+        return v[:16]
+    return v[:10] or None
+
+
 @csrf_exempt
 def shed_webhook(request, *args, **kwargs):
+    try:
+        return _shed_webhook(request)
+    except Exception:
+        _shed_log.exception('[shed_webhook] 500 name=%r', _json_body(request).get('name'))
+        return JsonResponse({'ok': False, 'message': 'server error'}, status=500)
+
+
+def _shed_webhook(request):
     """shed 프로젝트(Google Apps Script 경유)가 호출.
     - 최초 신청(name/phone 포함): SARANG_INTAKE_QUEUE에 pending으로 적재.
     - type 없이 env/introducer까지 동봉(현재 라이브 GAS의 "이관하기" 페이로드): 바로 submitted로 적재.
@@ -1772,7 +1788,7 @@ def shed_webhook(request, *args, **kwargs):
         env = str(body.get('env') or '').strip() or None
         reaction = str(body.get('reaction') or '').strip() or None
         tm_location = str(body.get('tmLocation') or '').strip() or None
-        tm_datetime = str(body.get('tmDatetime') or '').strip() or None
+        tm_datetime = _shed_tm_datetime(body.get('tmDatetime'))
 
         client = DataRouterClient()
         introducer_id, helper_ids_str = _intake_people(client, body)
@@ -1802,7 +1818,7 @@ def shed_webhook(request, *args, **kwargs):
     region = str(body.get('region') or '').strip() or None
     reaction = str(body.get('reaction') or '').strip() or None
     tm_location = str(body.get('tmLocation') or '').strip() or None
-    tm_datetime = str(body.get('tmDatetime') or '').strip() or None
+    tm_datetime = _shed_tm_datetime(body.get('tmDatetime'))
     rest_type = str(body.get('rest') or '').strip() or None
     mbti = str(body.get('mbti') or '').strip() or None
 
