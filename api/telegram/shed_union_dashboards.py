@@ -443,6 +443,9 @@ def _fetch_reservations(client, regions):
     placeholders, values = _in_clause(regions, start=1)
     rows = client.query(
         f"""SELECT s.SARANG_ID, spi.NAME AS PI_NAME, mah.REGION_CODE, im.NAME AS INTRODUCER_NAME, cm.NAME AS CALLER_NAME,
+                   (SELECT MAX(am.NAME) KEEP (DENSE_RANK LAST ORDER BY al.CREATED_AT)
+                      FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS am ON am.MEMBER_ID = al.ACTOR_MEMBER_ID
+                     WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '선문자발송') AS SENDER_NAME,
                    TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'YYYY-MM-DD') AS RES_DATE,
                    TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'HH24:MI') AS RES_TIME
               FROM SARANG s
@@ -467,7 +470,7 @@ def _fetch_reservations(client, regions):
     if link_values:
         queued = client.query(
             f"""SELECT q.NAME AS PI_NAME, TO_CHAR(q.SOURCE_LINK) AS REGION_CODE, im.NAME AS INTRODUCER_NAME,
-                       NULL AS CALLER_NAME,
+                       NULL AS CALLER_NAME, NULL AS SENDER_NAME,
                        TO_CHAR(q.TM_RESERVED_AT, 'YYYY-MM-DD') AS RES_DATE, TO_CHAR(q.TM_RESERVED_AT, 'HH24:MI') AS RES_TIME
                   FROM SARANG_INTAKE_QUEUE q
                   LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
@@ -497,6 +500,16 @@ def _fetch_pending_count(client, regions):
     return int(row['cnt']) if row else 0
 
 
+def _sched_person(group, r):
+    """마지막 칸. 135는 '섭자/지역/유입자/선문자자'(2026-10-03 요청): 유입자 말고 다른 사람이 예약 티엠을 잡았으면
+    그 사람, 아니면 선문자 보낸 사람, 안 보냈으면 빈칸. 246은 기존대로 통화자(없으면 유입자)."""
+    if group == '135':
+        if r['caller_name'] and r['caller_name'] != r['introducer_name']:
+            return r['caller_name']
+        return r.get('sender_name') or ''
+    return r['caller_name'] or r['introducer_name'] or '-'
+
+
 def _build_sched_text(group, label, rows, pending_count):
     now = timezone.localtime()
     today = now.date().isoformat()
@@ -523,13 +536,13 @@ def _build_sched_text(group, label, rows, pending_count):
         marker = '🌈' if key == today else '▫️'
         lines.append(f'{marker} {_fmt_md(key)}')
         for r in by_date[key]:
-            person = r['caller_name'] or r['introducer_name'] or '-'
+            person = _sched_person(group, r)
             lines.append(f"  {r['res_time']}  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}")
         lines.append('')
     if no_date:
         lines.append('🌈 날짜 미정')
         for r in no_date:
-            person = r['caller_name'] or r['introducer_name'] or '-'
+            person = _sched_person(group, r)
             lines.append(f"  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}")
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')
