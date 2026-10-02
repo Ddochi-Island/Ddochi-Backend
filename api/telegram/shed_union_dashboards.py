@@ -465,18 +465,19 @@ def _fetch_reservations(client, regions):
                AND mah.REGION_CODE IN ({placeholders})""",
         values,
     )
-    # 이관받기 대기 중 — 아직 SARANG이 없어 지역 대신 유입 링크 번호(135=1/3/5, 246=2/4/6)로 묶음
-    link_marks, link_values = _in_clause([int(r) for r in regions if str(r).isdigit()], start=1)
+    # 이관받기 대기 중 — 지역은 유입자 소속(이관 후와 같은 기준), 유입자 정보가 없으면 유입 링크 번호
+    link_marks, link_values = _in_clause([str(r) for r in regions], start=1)
     if link_values:
         queued = client.query(
-            f"""SELECT q.NAME AS PI_NAME, TO_CHAR(q.SOURCE_LINK) AS REGION_CODE, im.NAME AS INTRODUCER_NAME,
+            f"""SELECT q.NAME AS PI_NAME, COALESCE(imah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) AS REGION_CODE, im.NAME AS INTRODUCER_NAME,
                        NULL AS CALLER_NAME, NULL AS SENDER_NAME,
                        TO_CHAR(q.TM_RESERVED_AT, 'YYYY-MM-DD') AS RES_DATE, TO_CHAR(q.TM_RESERVED_AT, 'HH24:MI') AS RES_TIME
                   FROM SARANG_INTAKE_QUEUE q
                   LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
+                  LEFT JOIN MEMBER_AFFILIATION_HISTORIES imah ON imah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND imah.IS_CURRENT = 1
                  WHERE q.STATUS IN ('pending', 'submitted')
                    AND q.TM_RESERVED_AT >= SYSTIMESTAMP - INTERVAL '3' DAY
-                   AND q.SOURCE_LINK IN ({link_marks})""",
+                   AND COALESCE(imah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) IN ({link_marks})""",
             link_values,
         )
         for q in queued:
@@ -488,13 +489,14 @@ def _fetch_reservations(client, regions):
 
 def _fetch_pending_count(client, regions):
     """번호찾 미재가 = shed에서 넘어와 아직 이관받지 않은 건(레거시 NUMBER_STATUS pending 대응).
-    SARANG이 아직 없어 유입 링크 번호(135=1/3/5, 246=2/4/6)로 묶음."""
-    link_marks, link_values = _in_clause([int(r) for r in regions if str(r).isdigit()], start=1)
+    지역은 유입자 소속(이관 후 판들과 같은 기준), 유입자 정보가 없으면 유입 링크 번호."""
+    link_marks, link_values = _in_clause([str(r) for r in regions], start=1)
     if not link_values:
         return 0
     row = client.query_one(
-        f"""SELECT COUNT(*) AS CNT FROM SARANG_INTAKE_QUEUE
-             WHERE STATUS IN ('pending', 'submitted') AND SOURCE_LINK IN ({link_marks})""",
+        f"""SELECT COUNT(*) AS CNT FROM SARANG_INTAKE_QUEUE q
+              LEFT JOIN MEMBER_AFFILIATION_HISTORIES imah ON imah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND imah.IS_CURRENT = 1
+             WHERE q.STATUS IN ('pending', 'submitted') AND COALESCE(imah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) IN ({link_marks})""",
         link_values,
     )
     return int(row['cnt']) if row else 0
