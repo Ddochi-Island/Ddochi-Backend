@@ -507,9 +507,15 @@ def update_match(request, *args, **kwargs):
              str(data.get('qna') or '').strip() or None, str(data.get('etc') or '').strip() or None,
              hj['hab_jae_yang_id']],
         )
+        if 'selfImage' in data:  # 나의 이미지 — 수정 팝업에 새로 생김. 안 보낸 구버전 화면이 비우지 않게 키가 있을 때만
+            client.exec(
+                "UPDATE SARANG_HAB_JAE_YANG SET SELF_IMAGE = :1 WHERE HAB_JAE_YANG_ID = :2",
+                [str(data.get('selfImage') or '').strip() or None, hj['hab_jae_yang_id']],
+            )
         mbti = str(data.get('mbti') or '').strip()
         if mbti:
             client.exec("UPDATE SARANG SET MBTI = :1 WHERE SARANG_ID = :2", [mbti, sarang_id])
+        send_habjaeyang_to_telegram(client, sarang_id)  # 텔레그램 카드도 수정 내용으로 갱신(기존 메시지 edit)
         return JsonResponse({'success': True, 'message': '반영 완료!'})
 
     if edit_type != 'status':
