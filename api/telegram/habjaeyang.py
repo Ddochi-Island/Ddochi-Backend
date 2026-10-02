@@ -2,6 +2,7 @@
 # 데이터 출처가 SARANG_* 스키마로 바뀌어서 쿼리/필드는 새로 짰지만, 메시지 포맷(v2)과
 # 인라인 버튼(답장/창개설/재가) 구조는 원본 그대로 따라감.
 import datetime
+import html
 import logging
 
 from django.conf import settings
@@ -99,6 +100,8 @@ def _travel_label(minutes, transfers):
 
 
 def _build_text(row):
+    # parse_mode=HTML이라 입력값의 '<', '&'(예: '동탄 <-> 용인')가 그대로 들어가면 텔레그램이 카드 전체를 거부함
+    row = {k: html.escape(v, quote=False) if isinstance(v, str) else v for k, v in row.items()}
     week = ['일', '월', '화', '수', '목', '금', '토']
     mt_date = (row['match_scheduled_at'] or '')[:10] if row['match_scheduled_at'] else ''
     mt_time = (row['match_scheduled_at'] or '')[11:16] if row['match_scheduled_at'] else ''
