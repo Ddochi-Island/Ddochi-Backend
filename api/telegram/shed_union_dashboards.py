@@ -522,7 +522,7 @@ def _sched_person(group, r):
 def _sched_result(r, now_key):
     """결과(있으면) + 표시: 통화 결과가 있으면 ⭕, 예약 시각이 지났는데 결과가 없으면 ❌, 아직이면 없음."""
     if r.get('result_label'):
-        return f" | {r['result_label']} ⭕"
+        return f" | ⭕ ({r['result_label']})"
     if r['res_date'] and f"{r['res_date']} {r['res_time'] or '00:00'}" < now_key:
         return ' ❌'
     return ''
