@@ -42,9 +42,13 @@ PIONEER는 코드 문자열만 받고 저장한다. 코드→이름 해석은 Dd
 
 ## 상태
 
-- [x] Ddochi2: 코드 생성/해석 헬퍼 (`api/util/referral.py`)
-- [ ] Ddochi2: `REFERRAL_SECRET` 환경변수 설정 (서버에만, PIONEER에는 넣지 않음)
-- [x] PIONEER: `/event`에서 `ref` 읽기 + `sessionStorage` 저장 (`components/event/EventApplyForm.jsx`)
-- [x] PIONEER: 제출 시 `referrer` 전송 (없으면 `direct`)
-- [ ] Apps Script: 새 버전 붙여넣기 후 재배포 — `유입코드` 헤더는 `doPost`가 없으면 자동 추가
-- [ ] 관리자: 코드→지역원 해석 화면 (`/admin`에 표시하거나 Ddochi2에서 조회)
+해석 위치는 원안(또치 관리자 화면) 대신 PIONEER `/admin`에 이름까지 표시하기로 함(2026-10-03). PIONEER 서버가
+`POST /api/referral/resolve`(헤더 `X-Pioneer-Key`, 공유 키 `PIONEER_INTERNAL_KEY`)를 서버 간 호출하고, 응답은 이름·지역뿐(사번 없음).
+지역원은 또치 앱 홈의 "내 추천 링크"(`POST /api/referral/my-link`)로 자기 링크를 복사.
+
+- [x] Ddochi2: 코드 생성/해석 헬퍼 (`api/util/referral.py`) + API (`api/views/referral.py`)
+- [ ] Ddochi2: `REFERRAL_SECRET`, `PIONEER_INTERNAL_KEY` 환경변수 설정 (VM `.env`)
+- [x] PIONEER: `/event`에서 `ref` 읽기 + `sessionStorage` 저장
+- [x] PIONEER: 제출 시 `referrer` 전송
+- [ ] Apps Script: `유입코드` 컬럼 기록
+- [x] 관리자: PIONEER `/admin`에 `유입자` 컬럼 (`DDOCHI_API_URL`, `PIONEER_INTERNAL_KEY` Vercel env 필요)
