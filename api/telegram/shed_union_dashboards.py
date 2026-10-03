@@ -447,30 +447,37 @@ def _fetch_reservations(client, regions):
                       FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS am ON am.MEMBER_ID = al.ACTOR_MEMBER_ID
                      WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '선문자발송') AS SENDER_NAME,
                    TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'YYYY-MM-DD') AS RES_DATE,
-                   TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'HH24:MI') AS RES_TIME
+                   TO_CHAR(COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT), 'HH24:MI') AS RES_TIME,
+                   s.STAGE,
+                   -- 결과: 이 예약을 잡은 뒤(통화 예약이면 그 기록 이후, 이관 예약이면 전부) 남긴 최신 통화 결과
+                   (SELECT MAX(trc.LABEL) KEEP (DENSE_RANK LAST ORDER BY t2.CREATED_AT)
+                      FROM TM_LOGS t2 JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = t2.RESULT
+                     WHERE t2.SARANG_ID = s.SARANG_ID AND t2.RESULT <> 'RESERVED_TM'
+                       AND (tl.CREATED_AT IS NULL OR t2.CREATED_AT > tl.CREATED_AT)) AS RESULT_LABEL
               FROM SARANG s
               JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
               JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
               JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
               LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
               LEFT JOIN (
-                SELECT SARANG_ID, RESERVED_TM_AT, CALLER_MEMBER_ID,
+                SELECT SARANG_ID, RESERVED_TM_AT, CALLER_MEMBER_ID, CREATED_AT,
                        ROW_NUMBER() OVER (PARTITION BY SARANG_ID ORDER BY CREATED_AT DESC) AS RN
                   FROM TM_LOGS WHERE RESULT = 'RESERVED_TM' AND RESERVED_TM_AT IS NOT NULL
               ) tl ON tl.SARANG_ID = s.SARANG_ID AND tl.RN = 1
               LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = tl.CALLER_MEMBER_ID
              WHERE s.DELETED_AT IS NULL
-               AND s.STAGE IN ('유입', '티엠')
                AND COALESCE(tl.RESERVED_TM_AT, sid.TM_RESERVED_AT) >= SYSTIMESTAMP - INTERVAL '3' DAY
                AND mah.REGION_CODE IN ({placeholders})""",
         values,
     )
+    # 티엠 단계를 지난 사람은 이 예약의 결과(만남 픽스 등)가 있을 때만 남김 — 결과 없이 넘어간 건은 예전처럼 제외
+    rows = [r for r in rows if r['stage'] in ('유입', '티엠') or r['result_label']]
     # 이관받기 대기 중 — 지역은 유입자 소속(이관 후와 같은 기준), 유입자 정보가 없으면 유입 링크 번호
     link_marks, link_values = _in_clause([str(r) for r in regions], start=1)
     if link_values:
         queued = client.query(
             f"""SELECT q.NAME AS PI_NAME, COALESCE(imah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) AS REGION_CODE, im.NAME AS INTRODUCER_NAME,
-                       NULL AS CALLER_NAME, NULL AS SENDER_NAME,
+                       NULL AS CALLER_NAME, NULL AS SENDER_NAME, NULL AS RESULT_LABEL,
                        TO_CHAR(q.TM_RESERVED_AT, 'YYYY-MM-DD') AS RES_DATE, TO_CHAR(q.TM_RESERVED_AT, 'HH24:MI') AS RES_TIME
                   FROM SARANG_INTAKE_QUEUE q
                   LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
@@ -512,6 +519,10 @@ def _sched_person(group, r):
     return r['caller_name'] or r['introducer_name'] or '-'
 
 
+def _sched_result(r):
+    return f" | {r['result_label']}" if r.get('result_label') else ''
+
+
 def _build_sched_text(group, label, rows, pending_count):
     now = timezone.localtime()
     today = now.date().isoformat()
@@ -539,13 +550,13 @@ def _build_sched_text(group, label, rows, pending_count):
         lines.append(f'{marker} {_fmt_md(key)}')
         for r in by_date[key]:
             person = _sched_person(group, r)
-            lines.append(f"  {r['res_time']}  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}")
+            lines.append(f"  {r['res_time']}  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}{_sched_result(r)}")
         lines.append('')
     if no_date:
         lines.append('🌈 날짜 미정')
         for r in no_date:
             person = _sched_person(group, r)
-            lines.append(f"  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}")
+            lines.append(f"  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}{_sched_result(r)}")
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')
     text = '\n'.join(lines)
