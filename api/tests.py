@@ -214,3 +214,32 @@ class SproutApprovalTests(SimpleTestCase):
         self.assertTrue(_can_decide_sprout({'position_code': 'team_evangelist', 'region_code': '3', 'group_districts': []}, '3', '4'))
         self.assertFalse(_can_decide_sprout({'position_code': 'area_lead', 'region_code': '3', 'group_districts': []}, '3', '1'))
         self.assertTrue(_can_decide_sprout({'position_code': 'admin', 'region_code': None, 'group_districts': []}, '6', '1'))
+
+
+class ReferralCodeTests(SimpleTestCase):
+    def test_code_is_stable_16_chars_and_secret_dependent(self):
+        from api.util.referral import referral_code
+        a = referral_code('10001', 'secret-a')
+        self.assertEqual(a, referral_code('10001', 'secret-a'))
+        self.assertEqual(len(a), 16)
+        self.assertNotIn('10001', a)
+        self.assertNotEqual(a, referral_code('10001', 'secret-b'))
+        self.assertNotEqual(a, referral_code('10002', 'secret-a'))
+
+    def test_batch_resolve_matches_without_member_id(self):
+        from api.util import referral
+        rows = [{'member_id': '10001', 'name': '홍길동', 'region_code': '3'},
+                {'member_id': '10002', 'name': '김철수', 'region_code': '6'}]
+        code = referral.referral_code('10002', 's')
+        with patch.object(referral, 'DataRouterClient') as dr:
+            dr.return_value.query.return_value = rows
+            out = referral.resolve_referral_codes([code, 'nomatch', ''], 's')
+        self.assertEqual(out, {code: {'name': '김철수', 'region': '6'}})
+
+    @override_settings(PIONEER_INTERNAL_KEY='k')
+    def test_resolve_endpoint_requires_key(self):
+        r = self.client.post('/api/referral/resolve', data=json.dumps({'codes': ['x']}), content_type='application/json')
+        self.assertEqual(r.status_code, 401)
+        r = self.client.post('/api/referral/resolve', data=json.dumps({'codes': ['x']}),
+                             content_type='application/json', HTTP_X_PIONEER_KEY='wrong')
+        self.assertEqual(r.status_code, 401)

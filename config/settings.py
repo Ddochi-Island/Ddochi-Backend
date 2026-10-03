@@ -41,6 +41,8 @@ DATA_ROUTER_TIMEOUT_MS = config('DATA_ROUTER_TIMEOUT_MS', default=15000, cast=in
 # shed 어드민(외부 Vercel 프로젝트)이 X-Shed-Key 헤더로 인증하는 내부 공유키.
 # services/main 의 SHED_INTERNAL_KEY 와 동일한 값이어야 shed 쪽에서 붙일 수 있음.
 SHED_INTERNAL_KEY = config('SHED_INTERNAL_KEY', default='')
+# PIONEER(/event 추천 코드) 서버가 /api/referral/resolve를 부를 때 쓰는 공유 키 — PIONEER Vercel env와 같은 값
+PIONEER_INTERNAL_KEY = config('PIONEER_INTERNAL_KEY', default='')
 
 # shed 사이트가 브라우저에서 /api/shed/*를 부를 때 허용할 origin(콤마 구분) — api/cors_middleware.py.
 # 기본값 = 현재 shed 배포(개인계정) + 구 팀 프로젝트. 도메인이 바뀌면 env로 덮어쓰면 됨.
