@@ -519,13 +519,19 @@ def _sched_person(group, r):
     return r['caller_name'] or r['introducer_name'] or '-'
 
 
-def _sched_result(r):
-    return f" | {r['result_label']}" if r.get('result_label') else ''
+def _sched_result(r, now_key):
+    """결과(있으면) + 표시: 통화 결과가 있으면 ⭕, 예약 시각이 지났는데 결과가 없으면 ❌, 아직이면 없음."""
+    if r.get('result_label'):
+        return f" | {r['result_label']} ⭕"
+    if r['res_date'] and f"{r['res_date']} {r['res_time'] or '00:00'}" < now_key:
+        return ' ❌'
+    return ''
 
 
 def _build_sched_text(group, label, rows, pending_count):
     now = timezone.localtime()
     today = now.date().isoformat()
+    now_key = now.strftime('%Y-%m-%d %H:%M')
 
     by_date = {}
     no_date = []
@@ -550,13 +556,13 @@ def _build_sched_text(group, label, rows, pending_count):
         lines.append(f'{marker} {_fmt_md(key)}')
         for r in by_date[key]:
             person = _sched_person(group, r)
-            lines.append(f"  {r['res_time']}  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}{_sched_result(r)}")
+            lines.append(f"  {r['res_time']}  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}{_sched_result(r, now_key)}")
         lines.append('')
     if no_date:
         lines.append('🌈 날짜 미정')
         for r in no_date:
             person = _sched_person(group, r)
-            lines.append(f"  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}{_sched_result(r)}")
+            lines.append(f"  {r['pi_name']} | {r['region_code']}지역 | {r['introducer_name'] or '-'} | {person}{_sched_result(r, now_key)}")
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')
     text = '\n'.join(lines)
