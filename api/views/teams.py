@@ -63,8 +63,9 @@ def get_team_areas(request, *args, **kwargs):
     if not team:
         return JsonResponse({'success': False, 'message': 'team 필요'}, status=400)
     rows = DataRouterClient().query(
-        """SELECT DISTINCT DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES
-            WHERE IS_CURRENT = 1 AND REGION_CODE = :1 AND DISTRICT_CODE IS NOT NULL AND DISTRICT_CODE != '0'""",
+        """SELECT DISTINCT mah.DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES mah
+             JOIN MEMBERS m ON m.MEMBER_ID = mah.MEMBER_ID AND m.STATUS = 'ACTIVE' AND m.DELETED_AT IS NULL
+            WHERE mah.IS_CURRENT = 1 AND mah.REGION_CODE = :1 AND mah.DISTRICT_CODE IS NOT NULL AND mah.DISTRICT_CODE != '0'""",
         [team],
     )
     codes = sorted((r['district_code'] for r in rows), key=lambda c: (not c.isdigit(), int(c) if c.isdigit() else 0, c))

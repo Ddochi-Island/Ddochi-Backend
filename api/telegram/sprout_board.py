@@ -27,8 +27,9 @@ def _fetch(client):
         fetch_limit=5000,
     )
     districts = client.query(
-        """SELECT DISTINCT REGION_CODE, DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES
-            WHERE IS_CURRENT = 1 AND DISTRICT_CODE IS NOT NULL"""
+        """SELECT DISTINCT mah.REGION_CODE, mah.DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES mah
+             JOIN MEMBERS m ON m.MEMBER_ID = mah.MEMBER_ID AND m.STATUS = 'ACTIVE' AND m.DELETED_AT IS NULL
+            WHERE mah.IS_CURRENT = 1 AND mah.DISTRICT_CODE IS NOT NULL"""
     )
     return groups, cards, districts
 

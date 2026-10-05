@@ -51,9 +51,11 @@ def _table_row(dc, cols):
 
 def _fetch_districts(client, region_code):
     rows = client.query(
-        """SELECT DISTINCT DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES
-            WHERE REGION_CODE = :1 AND IS_CURRENT = 1 AND DISTRICT_CODE IS NOT NULL
-            ORDER BY DISTRICT_CODE""",
+        # 비활성 회원만 남은 구역(예: 4지역 8구역)은 안 보이게 — 활성 회원이 있는 구역만
+        """SELECT DISTINCT mah.DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES mah
+             JOIN MEMBERS m ON m.MEMBER_ID = mah.MEMBER_ID AND m.STATUS = 'ACTIVE' AND m.DELETED_AT IS NULL
+            WHERE mah.REGION_CODE = :1 AND mah.IS_CURRENT = 1 AND mah.DISTRICT_CODE IS NOT NULL
+            ORDER BY mah.DISTRICT_CODE""",
         [region_code],
     )
     return [r['district_code'] for r in rows]
