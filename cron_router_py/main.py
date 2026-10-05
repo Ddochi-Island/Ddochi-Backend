@@ -49,18 +49,23 @@ async def _guarded_run_tick(source):
         _ticking = False
 
 
+def _ms_to_next_boundary():
+    """다음 TICK_INTERVAL 경계(:00, :10, :20…)까지 남은 ms. 매번 벽시계로 다시 맞춰서 정각 발송이
+    컨테이너 시작 시각만큼 밀리지 않게 함 — 전엔 첫 tick만 분 경계에 맞추고 이후 고정 10분이라 배포 시각에 따라
+    매시 :08 같은 데서 발송됐음(2026-10-05). UTC 경계 = KST 경계(9시간은 10분의 배수)."""
+    interval = config.TICK_INTERVAL_MS
+    return interval - (int(time.time() * 1000) % interval)
+
+
 async def _self_tick_loop():
-    # 다음 분(minute) 경계에 맞춰 첫 tick 시작 — :00, :10, :20... 정렬 유지.
-    ms_to_next_minute = 60_000 - (int(time.time() * 1000) % 60_000)
-    await asyncio.sleep(max(5, ms_to_next_minute / 1000))
     while True:
+        await asyncio.sleep(max(1, _ms_to_next_boundary()) / 1000 + 0.5)  # 경계 0.5초 뒤 — 시계 오차로 직전에 깨는 것 방지
         try:
             result = await _guarded_run_tick('self')
             if result.get('fired'):
                 logger.info('self-tick fired count=%s', len(result['fired']))
         except Exception:
             logger.exception('self-tick error')
-        await asyncio.sleep(config.TICK_INTERVAL_MS / 1000)
 
 
 @app.on_event('startup')
