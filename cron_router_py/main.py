@@ -58,8 +58,13 @@ def _ms_to_next_boundary():
 
 
 async def _self_tick_loop():
+    # 시작 직후 한 번 — 정각 직전·직후 재시작으로 놓친 발송(최근 1시간, LOOKBACK)을 다음 경계까지 기다리지 않고 바로 보냄.
+    # 같은 회차 중복 발송은 run_tick의 LAST_RUN_AT CAS가 막음.
+    first = True
     while True:
-        await asyncio.sleep(max(1, _ms_to_next_boundary()) / 1000 + 0.5)  # 경계 0.5초 뒤 — 시계 오차로 직전에 깨는 것 방지
+        if not first:
+            await asyncio.sleep(max(1, _ms_to_next_boundary()) / 1000 + 0.5)  # 경계 0.5초 뒤 — 시계 오차로 직전에 깨는 것 방지
+        first = False
         try:
             result = await _guarded_run_tick('self')
             if result.get('fired'):
