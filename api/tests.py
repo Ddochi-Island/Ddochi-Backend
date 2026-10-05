@@ -268,11 +268,10 @@ class SproutBoardTests(SimpleTestCase):
                   {'region_code': '1', 'group_name': '2반', 'district_codes': '3'}]
         cards = [{**full, 'region_code': '1', 'district_code': '1', 'name': '<지인>', 'author_name': '인도자', 'sprout_status': 'approved'},
                  {**full, 'region_code': '1', 'district_code': '3', 'name': 'b', 'author_name': 'c', 'sprout_status': 'pending'}]
-        districts = [{'region_code': '1', 'district_code': d} for d in ('1', '2', '3')]
-        with patch.object(b, '_fetch', return_value=(groups, cards, districts)):
+        with patch.object(b, '_fetch', return_value=(groups, cards)):
             text = b.build_text(None)
         self.assertIn('<b>전체 1 / 10</b>', text)
         self.assertIn('&lt;지인&gt; / <i>인도자</i>', text)
-        self.assertIn('재가 대기 1건', text)
-        self.assertIn('1구역 <b>1</b> · 2구역 0 · 3구역 0', text)
+        self.assertIn('⏳ 대기 1', text)
+        self.assertIn('<i>1구역 1</i>', text)
         self.assertIn('1반 ●○○○○   2반 ○○○○○', text)
