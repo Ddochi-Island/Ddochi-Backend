@@ -33,8 +33,22 @@ def _dots(cur, goal):
     return '●' * min(cur, goal) + '○' * max(goal - cur, 0)
 
 
-def build_text(client):
+def _sample_cards():
+    """모양 확인용 가짜 떡잎(실DB에 안 넣음) — 실제 반 구조 위에 지역마다 다른 개수로 깔아봄."""
+    full = {f: 'x' for f in ('age', 'gender', 'phone', 'residence', 'school_major', 'environment', *_JOURNAL_FIELDS)}
+    spec = [('1', '1', 2), ('1', '4', 1), ('1', '6', 2), ('2', '3', 1), ('3', '4', 3), ('3', '1', 1),
+            ('5', '2', 5), ('6', '7', 1)]
+    cards = [{**full, 'region_code': r, 'district_code': d, 'name': f'예시{r}{d}{i}', 'author_name': '인도자',
+              'sprout_status': 'approved'} for r, d, n in spec for i in range(n)]
+    cards += [{**full, 'region_code': r, 'district_code': '1', 'name': 'x', 'author_name': 'y', 'sprout_status': 'pending'}
+              for r in ('2', '3', '3')]
+    return cards
+
+
+def build_text(client, sample=False):
     groups, cards = _fetch(client)
+    if sample:
+        cards = _sample_cards()
     sprouts = [c for c in cards if _journal_stage(c) == '떡잎']
     pending = [c for c in cards if c['sprout_status'] == 'pending']
 
@@ -46,7 +60,7 @@ def build_text(client):
     total_goal = GROUP_SPROUT_GOAL * len(groups)
     pct = round(100 * len(sprouts) / total_goal) if total_goal else 0
     lines = [
-        '🍀 <b>수지역 떡잎 전광판</b>',
+        '🍀 <b>수지역 떡잎 전광판</b>' + (' <i>(예시 데이터)</i>' if sample else ''),
         f'<i>{now.month:02d}/{now.day:02d}({_WEEK[now.weekday()]}) {now:%H:%M} 기준</i>',
         '',
         f'<b>전체 {len(sprouts)} / {total_goal}</b>  ·  {pct}%',
@@ -86,12 +100,12 @@ def build_text(client):
 _MARKUP = {'inline_keyboard': [[{'text': '🏞️ 밭 관리하기에서 보기', 'url': 'https://page.ddochi.cloud/#/shortCardList'}]]}
 
 
-def send_sprout_board(client):
+def send_sprout_board(client, sample=False):
     cfg = load_team_config(client, TEAM_ID)
     chat_id = cfg.get('matchingChatId')
     if not chat_id:
         return {'skipped': True, 'reason': 'no_chat_id'}
     return send_fresh_dashboard(
-        client, TEAM_ID, chat_id, build_text(client), _MARKUP, cfg,
+        client, TEAM_ID, chat_id, build_text(client, sample), _MARKUP, cfg,
         'lastSproutBoardMsgId', 'lastSproutBoardMsgDate', 'sprout_board',
     )

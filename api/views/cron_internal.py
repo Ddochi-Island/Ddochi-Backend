@@ -1,4 +1,6 @@
 """cronInternal.js 포팅 대상 — cron_internal 라우트 스텁 (구조만, 로직은 미구현)."""
+import json
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -366,4 +368,8 @@ def send_sprout_board_view(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
-    return JsonResponse({'success': True, 'result': send_sprout_board(DataRouterClient())})
+    try:
+        sample = bool(json.loads(request.body or b'{}').get('sample'))  # 모양 확인용 1회 발송(가짜 떡잎)
+    except (TypeError, ValueError, AttributeError):
+        sample = False
+    return JsonResponse({'success': True, 'result': send_sprout_board(DataRouterClient(), sample)})
