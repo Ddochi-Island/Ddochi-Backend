@@ -96,11 +96,12 @@ def build_blocks(client, sample=False):
 
     # 구역별 표 — 지역 × 구역, 그 지역에 없는 구역은 빈칸
     all_d = sorted({d for ds in region_districts.values() for d in ds}, key=_num_key)
-    district_table = [[_cell('지역'), *[_cell(f'{d}구역') for d in all_d]]]
+    district_table = [[_cell('지역'), *[_cell(f'{d}구역') for d in all_d], _cell('합계', bold=True)]]
     for region in by_region:
         mine = region_districts.get(region, set())
         district_table.append([_cell(f'{region}지역'),
-                               *[_cell(str(count(region, [d])) if d in mine else '') for d in all_d]])
+                               *[_cell(str(count(region, [d])) if d in mine else '') for d in all_d],
+                               _cell(str(count(region)), bold=True)])
 
     # 명단 — 지역별 접이식, 안에 구역/지인/인도자 표
     roster = []
@@ -115,11 +116,11 @@ def build_blocks(client, sample=False):
     blocks = [
         {'type': 'heading', 'text': title, 'size': 2},
         {'type': 'paragraph', 'text': f'전체 {len(sprouts)} / {total_goal} ({pct}%) · 반마다 떡잎 {GROUP_SPROUT_GOAL}개 유지'},
-        {'type': 'details', 'summary': '구역별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': district_table}]},
+        {'type': 'details', 'summary': '📍 구역별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': district_table}]},
     ]
     if roster:
-        blocks.append({'type': 'details', 'summary': '떡잎 명단 (지인 / 인도자)', 'blocks': roster})
-    blocks.append({'type': 'details', 'summary': '반별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': main}]})
+        blocks.append({'type': 'details', 'summary': '📝 떡잎 명단 (지인 / 인도자)', 'blocks': roster})
+    blocks.append({'type': 'details', 'summary': '👥 반별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': main}]})
     blocks.append({'type': 'footer', 'text': {'type': 'italic',
                                               'text': f'{now.month}/{now.day}({_WEEK[now.weekday()]}) {now:%H:%M} 기준'}})
     return blocks
