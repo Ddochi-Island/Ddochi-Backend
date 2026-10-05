@@ -256,3 +256,21 @@ class SproutDeciderTests(SimpleTestCase):
         self.assertTrue(_can_decide_sprout({**ctx, 'position_code': 'region_general_secretary'}, '6', '3'))
         for code in ('region_clerk', 'region_mission_clerk'):
             self.assertFalse(_can_decide_sprout({**ctx, 'position_code': code}, '1', '1'))
+
+
+class SproutBoardTests(SimpleTestCase):
+    def test_counts_names_pending_and_table(self):
+        from api.telegram import sprout_board as b
+        full = {f: 'x' for f in ['age', 'gender', 'phone', 'residence', 'school_major', 'environment', 'relation',
+                                 'personality', 'hobby', 'has_partner', 'family_relation', 'desired_image',
+                                 'recent_concern', 'family_atmosphere', 'human_relations']}
+        groups = [{'region_code': '1', 'group_name': '1반', 'district_codes': '1,2'},
+                  {'region_code': '1', 'group_name': '2반', 'district_codes': '3'}]
+        cards = [{**full, 'region_code': '1', 'district_code': '1', 'name': '<지인>', 'author_name': '인도자', 'sprout_status': 'approved'},
+                 {**full, 'region_code': '1', 'district_code': '3', 'name': 'b', 'author_name': 'c', 'sprout_status': 'pending'}]
+        with patch.object(b, '_fetch', return_value=(groups, cards)):
+            text = b.build_text(None)
+        self.assertIn('<b>전체 1 / 10</b>', text)
+        self.assertIn('&lt;지인&gt; / <i>인도자</i>', text)
+        self.assertIn('재가 대기 1건', text)
+        self.assertIn('1지역  1/5   0/5', text)

@@ -6,6 +6,7 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import send_fresh_matching_dashboard
 from api.telegram.prospect_dashboard import send_fresh_prospect_dashboard
+from api.telegram.sprout_board import send_sprout_board
 from api.telegram.shed_union_dashboards import send_fresh_shed_sched, send_fresh_shed_tm, send_fresh_shed_unified
 from api.telegram.team_config import cron_job_enabled, list_prospect_chat_team_ids, list_stats_chat_team_ids, load_team_config
 from api.telegram.team_stats import send_fresh_team_stats
@@ -356,3 +357,13 @@ def update_shed_246_sched_dashboard(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/cronInternal.js"}, status=501)
 
+
+
+@csrf_exempt
+def send_sprout_board_view(request, *args, **kwargs):
+    """매일 22시 — 수지역 떡잎 전광판("[대학] 전도시스템" 방)."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    return JsonResponse({'success': True, 'result': send_sprout_board(DataRouterClient())})

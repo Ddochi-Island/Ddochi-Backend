@@ -300,4 +300,5 @@ internal_cron_urlpatterns = [
     path('update-shed-246-tm-dashboard', cron_internal.update_shed_246_tm_dashboard, name='cron_internal_update_shed_246_tm_dashboard'),
     path('send-shed-246-sched-dashboard', cron_internal.send_shed_246_sched_dashboard, name='cron_internal_send_shed_246_sched_dashboard'),
     path('update-shed-246-sched-dashboard', cron_internal.update_shed_246_sched_dashboard, name='cron_internal_update_shed_246_sched_dashboard'),
+    path('send-sprout-board', cron_internal.send_sprout_board_view, name='cron_internal_send_sprout_board'),
 ]
