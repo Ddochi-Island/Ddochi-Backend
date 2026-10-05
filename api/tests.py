@@ -253,3 +253,6 @@ class SproutDeciderTests(SimpleTestCase):
         team_lead = {**ctx, 'position_code': 'team_lead'}
         self.assertFalse(_can_decide_sprout(team_lead, '6', '3'))
         self.assertTrue(_can_decide_sprout(team_lead, '1', '3'))
+        self.assertTrue(_can_decide_sprout({**ctx, 'position_code': 'region_general_secretary'}, '6', '3'))
+        for code in ('region_clerk', 'region_mission_clerk'):
+            self.assertFalse(_can_decide_sprout({**ctx, 'position_code': code}, '1', '1'))

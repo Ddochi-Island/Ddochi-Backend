@@ -14,10 +14,11 @@ _RELIGIONS = {'무교', '기독교', '불교', '천주교', '기타'}
 
 # 밭 관리하기 RBAC 티어 — POSITION_CODE 기준(POSITION_NAME 아님, region_clerk와
 # area_secretary가 둘 다 "수서기"라 이름만으로는 구분 불가).
-# 전도교관은 POSITION_CODES상 region 스코프지만 밭 관리하기(조회·떡잎 재가)는 전 지역(2026-10-05 사용자 결정)
-_TIER_GLOBAL = {'admin', 'executive', 'region_lead'}
-_TIER_REGION = {'team_lead', 'team_evangelist',
-                 'region_general_secretary', 'region_clerk', 'region_mission_clerk'}
+# 전도교관·지역총무는 POSITION_CODES상 region 스코프지만 밭 관리하기(조회·떡잎 재가)는 전 지역(2026-10-05 사용자 결정)
+_TIER_GLOBAL = {'admin', 'executive', 'region_lead', 'region_general_secretary'}
+_TIER_REGION = {'team_lead', 'team_evangelist', 'region_clerk', 'region_mission_clerk'}
+# 지역 밭은 보지만 떡잎 재가는 못 하는 직책 — 수서기·지역전도서기(2026-10-05 사용자 결정)
+_NO_SPROUT_DECIDE = {'region_clerk', 'region_mission_clerk'}
 # 반장 — 자기가 맡은 반(DISTRICT_GROUPS.LEADER_MEMBER_ID)의 구역 전체. 전도팀장 아래, 구역장 위.
 _TIER_GROUP = {'group_lead'}
 _TIER_DISTRICT_ALL = {'area_lead'}
@@ -134,6 +135,8 @@ def _journal_stage(row):
 def _can_decide_sprout(ctx, card_region, card_district):
     """떡잎 재가 권한 — 그 짧카(작성자 구역)가 속한 반의 반장 + 그 위 직책(같은 지역의 지역 티어, 전역)."""
     code = ctx['position_code']
+    if code in _NO_SPROUT_DECIDE:
+        return False
     if code in _TIER_GLOBAL:
         return True
     if card_region != ctx['region_code']:
