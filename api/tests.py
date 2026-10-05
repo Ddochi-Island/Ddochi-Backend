@@ -198,12 +198,15 @@ class SproutApprovalTests(SimpleTestCase):
             'personality': 'x', 'hobby': 'x', 'has_partner': 'x', 'family_relation': 'x', 'environment': 'x',
             'desired_image': 'x', 'recent_concern': 'x', 'family_atmosphere': 'x', 'human_relations': 'x'}
 
-    def test_stage3_needs_approval_to_be_sprout(self):
+    def test_stage2_plus_approval_is_sprout(self):
         from api.views.short_card import _journal_stage
         self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': None}), '새싹')
         self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'pending'}), '새싹')
         self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'approved'}), '떡잎')
-        self.assertEqual(_journal_stage({**self.FULL, 'human_relations': None, 'sprout_status': 'approved'}), '새싹')
+        # 3단계는 비어도 2단계까지 채우고 재가되면 떡잎(2026-10-05)
+        no3 = {**self.FULL, 'desired_image': None, 'recent_concern': None, 'family_atmosphere': None, 'human_relations': None}
+        self.assertEqual(_journal_stage({**no3, 'sprout_status': 'approved'}), '떡잎')
+        self.assertEqual(_journal_stage({**self.FULL, 'hobby': None, 'sprout_status': 'approved'}), '씨앗')
 
     def test_who_can_decide_sprout(self):
         from api.views.short_card import _can_decide_sprout

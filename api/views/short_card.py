@@ -122,10 +122,10 @@ def _stage3_complete(row):
 
 
 def _journal_stage(row):
-    """씨앗(기본)/새싹(2단계 완료)/떡잎(3단계 완료 + 반장 이상 재가). 3단계를 다 채워도 재가 전엔 새싹
-    (2026-09-30 변경 — 전엔 3단계만 채우면 바로 떡잎)."""
-    _, s2, s3 = _stage3_complete(row)
-    if s3 and row.get('sprout_status') == 'approved':
+    """씨앗(기본)/새싹(2단계 완료)/떡잎(2단계 완료 + 반장 이상 재가). 2단계까지 채우면 재가 요청, 재가 전엔 새싹
+    (2026-10-05 변경 — 전엔 3단계까지 다 채워야 재가 요청. 3단계는 이제 떡잎 이후에 채워가는 칸)."""
+    _, s2, _ = _stage3_complete(row)
+    if s2 and row.get('sprout_status') == 'approved':
         return '떡잎'
     if s2:
         return '새싹'
@@ -147,7 +147,7 @@ def _can_decide_sprout(ctx, card_region, card_district):
 
 
 def group_sprout_status(client, region_codes=None):
-    """반별 떡잎 수 — [{groupId, region, name, leaderName, sprouts, goal}]. 떡잎 = 3단계 완료 + 떡잎 재가,
+    """반별 떡잎 수 — [{groupId, region, name, leaderName, sprouts, goal}]. 떡잎 = 2단계 완료 + 떡잎 재가,
     작성자의 현재 구역이 그 반에 속한 짧카만 셈. region_codes가 None이면 전 지역."""
     sql = """SELECT g.GROUP_ID, g.REGION_CODE, g.GROUP_NAME, g.DISTRICT_CODES, m.NAME AS LEADER_NAME
                FROM DISTRICT_GROUPS g LEFT JOIN MEMBERS m ON m.MEMBER_ID = g.LEADER_MEMBER_ID
@@ -332,7 +332,7 @@ def _led_group_ids(client, sabun):
 @csrf_exempt
 @require_jwt
 def decide_sprout(request, *args, **kwargs):
-    """떡잎 재가/반려 — 3단계를 다 채워 재가 대기(SPROUT_STATUS='pending')인 짧카만, 그 반의 반장 이상."""
+    """떡잎 재가/반려 — 2단계까지 채워 재가 대기(SPROUT_STATUS='pending')인 짧카만, 그 반의 반장 이상."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -492,22 +492,22 @@ def save_short_card_journal(request, *args, **kwargs):
 
     client.exec(f"UPDATE SHORT_CARDS SET {', '.join(sets)} WHERE SHORT_CARD_ID = :{n}", args_)
 
-    # 3단계를 다 채우면 떡잎 재가 요청(대기), 반려됐던 건 다시 채워 저장하면 재요청. 이미 떡잎이면 그대로.
+    # 2단계까지 다 채우면 떡잎 재가 요청(대기), 반려됐던 건 다시 채워 저장하면 재요청. 이미 떡잎이면 그대로.
     cols = ', '.join(f.upper() for f in _JOURNAL_FIELDS)
     cur = client.query_one(
         f"""SELECT AGE, GENDER, PHONE, RESIDENCE, SCHOOL_MAJOR, ENVIRONMENT, SPROUT_STATUS, {cols}
               FROM SHORT_CARDS WHERE SHORT_CARD_ID = :1""",
         [short_card_id],
     )
-    _, _, s3 = _stage3_complete(cur)
+    _, s2, _ = _stage3_complete(cur)
     sprout = cur['sprout_status']
-    if s3 and sprout in (None, 'rejected'):
+    if s2 and sprout in (None, 'rejected'):
         client.exec(
             "UPDATE SHORT_CARDS SET SPROUT_STATUS = 'pending', SPROUT_DECIDED_BY = NULL, SPROUT_DECIDED_AT = NULL WHERE SHORT_CARD_ID = :1",
             [short_card_id],
         )
         return JsonResponse({'success': True, 'sproutRequested': True,
-                             'message': '3단계를 다 썼어요! 반장님이 재가하면 떡잎이 돼요 🍀'})
-    if not s3 and sprout == 'pending':
+                             'message': '2단계까지 다 썼어요! 반장님이 재가하면 떡잎이 돼요 🍀'})
+    if not s2 and sprout == 'pending':
         client.exec("UPDATE SHORT_CARDS SET SPROUT_STATUS = NULL WHERE SHORT_CARD_ID = :1", [short_card_id])
     return JsonResponse({'success': True, 'message': '농부일지 저장했어요!'})
