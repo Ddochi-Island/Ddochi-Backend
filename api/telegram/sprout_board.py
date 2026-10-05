@@ -68,7 +68,10 @@ def build_blocks(client, sample=False):
     for d in districts:
         if d['region_code'] in by_region:
             region_districts.setdefault(d['region_code'], set()).add(d['district_code'])
-    group_names = sorted({g['group_name'] for g in groups})
+    # 반 이름은 지역마다 다름(예: 5지역 9반·10반) — 지역 안에서 이름의 숫자순(문자열 정렬은 10반이 9반 앞에 옴)
+    for gs in by_region.values():
+        gs.sort(key=lambda g: (_num_key(''.join(ch for ch in g['group_name'] if ch.isdigit())), g['group_name']))
+    width = max((len(gs) for gs in by_region.values()), default=0)
 
     def count(region, ds=None):
         return sum(1 for c in sprouts if c['region_code'] == region and (ds is None or c['district_code'] in ds))
@@ -78,20 +81,17 @@ def build_blocks(client, sample=False):
     pct = round(100 * len(sprouts) / total_goal) if total_goal else 0
 
     # 메인 표 — 지역 × 반(n/5, 다 채우면 ✅) + 합계 + 재가 대기
-    main = [[_cell(h) for h in ['지역', *group_names, '합계', '대기']]]
+    main = [[_cell('지역'), *[_cell('반') for _ in range(width)], _cell('합계'), _cell('대기')]]
     for region, gs in by_region.items():
         row = [_cell(f'{region}지역')]
-        for name in group_names:
-            g = next((x for x in gs if x['group_name'] == name), None)
-            if not g:
-                row.append(_cell('-'))
-                continue
+        for g in gs:
             n = count(region, (g['district_codes'] or '').split(','))
-            row.append(_cell(f"{n}/{GROUP_SPROUT_GOAL}{' ✅' if n >= GROUP_SPROUT_GOAL else ''}"))
+            row.append(_cell(f"{g['group_name']} {n}/{GROUP_SPROUT_GOAL}{' ✅' if n >= GROUP_SPROUT_GOAL else ''}"))
+        row += [_cell('') for _ in range(width - len(gs))]
         waiting = sum(1 for c in pending if c['region_code'] == region)
         row += [_cell(f'{count(region)}/{GROUP_SPROUT_GOAL * len(gs)}', bold=True), _cell(str(waiting) if waiting else '-')]
         main.append(row)
-    main.append([_cell('전체', bold=True), *[_cell('') for _ in group_names],
+    main.append([_cell('전체', bold=True), *[_cell('') for _ in range(width)],
                  _cell(f'{len(sprouts)}/{total_goal}', bold=True), _cell(str(len(pending)) if pending else '-', bold=True)])
 
     # 구역별 표 — 지역 × 구역, 그 지역에 없는 구역은 빈칸

@@ -159,7 +159,9 @@ def group_sprout_status(client, region_codes=None):
         marks = ', '.join(f':{i + 1}' for i in range(len(region_codes)))
         sql += f' AND g.REGION_CODE IN ({marks})'
         args = list(region_codes)
-    groups = client.query(sql + ' ORDER BY g.REGION_CODE, g.GROUP_NAME', args)
+    groups = client.query(sql, args)
+    # 이름 숫자순(문자열 정렬은 '10반'이 '9반' 앞에 옴)
+    groups.sort(key=lambda g: (g['region_code'], int(re.sub(r'\D', '', g['group_name']) or 0), g['group_name']))
     if not groups:
         return []
     cols = ', '.join(f'sc.{f.upper()}' for f in _JOURNAL_FIELDS)

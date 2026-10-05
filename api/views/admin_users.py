@@ -320,7 +320,8 @@ def admin_groups_list(request, *args, **kwargs):
     if team_id:
         sql += " AND g.REGION_CODE = :1"
         args.append(team_id)
-    rows = client.query(sql + " ORDER BY g.REGION_CODE, g.GROUP_NAME", args)
+    rows = client.query(sql, args)
+    rows.sort(key=lambda r: (r['region_code'], int(re.sub(r'\D', '', r['group_name']) or 0), r['group_name']))  # 9반 < 10반
     return JsonResponse({'success': True, 'list': [{
         'groupId': r['group_id'], 'teamId': r['region_code'], 'name': r['group_name'],
         'areaIds': [d for d in (r['district_codes'] or '').split(',') if d],
