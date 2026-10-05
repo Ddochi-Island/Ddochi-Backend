@@ -114,11 +114,11 @@ def build_blocks(client, sample=False):
     blocks = [
         {'type': 'heading', 'text': title, 'size': 2},
         {'type': 'paragraph', 'text': f'전체 {len(sprouts)} / {total_goal} ({pct}%) · 반마다 떡잎 {GROUP_SPROUT_GOAL}개 유지'},
-        {'type': 'table', 'cells': main},
         {'type': 'details', 'summary': '구역별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': district_table}]},
     ]
     if roster:
         blocks.append({'type': 'details', 'summary': '떡잎 명단 (지인 / 인도자)', 'blocks': roster})
+    blocks.append({'type': 'details', 'summary': '반별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': main}]})
     blocks.append({'type': 'footer', 'text': {'type': 'italic',
                                               'text': f'{now.month}/{now.day}({_WEEK[now.weekday()]}) {now:%H:%M} 기준'}})
     return blocks

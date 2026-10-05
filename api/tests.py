@@ -271,10 +271,10 @@ class SproutBoardTests(SimpleTestCase):
         districts = [{'region_code': '1', 'district_code': d} for d in ('1', '2', '3')]
         with patch.object(b, '_fetch', return_value=(groups, cards, districts)):
             blocks = b.build_blocks(None)
-        main = blocks[2]['cells']
+        main = blocks[4]['blocks'][0]['cells']
         texts = lambda row: [c['text']['text'] if isinstance(c['text'], dict) else c['text'] for c in row]
         self.assertEqual(texts(main[0]), ['지역', '1반', '2반', '합계', '대기'])
         self.assertEqual(texts(main[1]), ['1지역', '1/5', '0/5', '1/10', '1'])
-        self.assertEqual(texts(blocks[3]['blocks'][0]['cells'][1]), ['1지역', '1', '0', '0'])
-        roster = blocks[4]['blocks'][0]['blocks'][0]['cells']
+        self.assertEqual(texts(blocks[2]['blocks'][0]['cells'][1]), ['1지역', '1', '0', '0'])
+        roster = blocks[3]['blocks'][0]['blocks'][0]['cells']
         self.assertEqual(texts(roster[1]), ['1구역', '<지인>', '인도자'])
