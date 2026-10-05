@@ -14,8 +14,9 @@ _RELIGIONS = {'무교', '기독교', '불교', '천주교', '기타'}
 
 # 밭 관리하기 RBAC 티어 — POSITION_CODE 기준(POSITION_NAME 아님, region_clerk와
 # area_secretary가 둘 다 "수서기"라 이름만으로는 구분 불가).
-_TIER_GLOBAL = {'admin', 'executive'}
-_TIER_REGION = {'team_lead', 'team_evangelist', 'region_lead',
+# 전도교관은 POSITION_CODES상 region 스코프지만 밭 관리하기(조회·떡잎 재가)는 전 지역(2026-10-05 사용자 결정)
+_TIER_GLOBAL = {'admin', 'executive', 'region_lead'}
+_TIER_REGION = {'team_lead', 'team_evangelist',
                  'region_general_secretary', 'region_clerk', 'region_mission_clerk'}
 # 반장 — 자기가 맡은 반(DISTRICT_GROUPS.LEADER_MEMBER_ID)의 구역 전체. 전도팀장 아래, 구역장 위.
 _TIER_GROUP = {'group_lead'}

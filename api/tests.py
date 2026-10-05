@@ -243,3 +243,13 @@ class ReferralCodeTests(SimpleTestCase):
         r = self.client.post('/api/referral/resolve', data=json.dumps({'codes': ['x']}),
                              content_type='application/json', HTTP_X_PIONEER_KEY='wrong')
         self.assertEqual(r.status_code, 401)
+
+
+class SproutDeciderTests(SimpleTestCase):
+    def test_region_lead_decides_any_region(self):
+        from api.views.short_card import _can_decide_sprout
+        ctx = {'position_code': 'region_lead', 'region_code': '1', 'district_code': '1', 'group_districts': []}
+        self.assertTrue(_can_decide_sprout(ctx, '6', '3'))
+        team_lead = {**ctx, 'position_code': 'team_lead'}
+        self.assertFalse(_can_decide_sprout(team_lead, '6', '3'))
+        self.assertTrue(_can_decide_sprout(team_lead, '1', '3'))
