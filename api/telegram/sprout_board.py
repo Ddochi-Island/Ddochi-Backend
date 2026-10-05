@@ -1,6 +1,5 @@
-# 수지역 떡잎 전광판 — 매일 22시 수지역장·전도교관·지역총무용으로 지역별/반별 떡잎 수와 지인/인도자 명단을 보냄
-import html
-
+# 수지역 떡잎 전광판 — 매일 22시 수지역장·전도교관·지역총무용으로 지역별/반별/구역별 떡잎 수와 지인/인도자 명단을 보냄
+# 텔레그램 리치 메시지(sendRichMessage, Bot API 10.1 블록: 제목/표/접이식) — 레거시 주간 점수판과 같은 방식.
 from django.utils import timezone
 
 from api.telegram.dashboard_send import send_fresh_dashboard
@@ -9,6 +8,7 @@ from api.views.short_card import GROUP_SPROUT_GOAL, _JOURNAL_FIELDS, _journal_st
 
 TEAM_ID = '수지역'  # 수지역 매칭현황판과 같은 방("[대학] 전도시스템", matchingChatId)
 _WEEK = ['월', '화', '수', '목', '금', '토', '일']
+_MARKUP = {'inline_keyboard': [[{'text': '🏞️ 밭 관리하기에서 보기', 'url': 'https://page.ddochi.cloud/#/shortCardList'}]]}
 
 
 def _fetch(client):
@@ -26,11 +26,11 @@ def _fetch(client):
              WHERE sc.DELETED_AT IS NULL AND sc.APPROVAL_STATUS = 'approved' AND sc.SPROUT_STATUS IN ('approved', 'pending')""",
         fetch_limit=5000,
     )
-    return groups, cards
-
-
-def _dots(cur, goal):
-    return '●' * min(cur, goal) + '○' * max(goal - cur, 0)
+    districts = client.query(
+        """SELECT DISTINCT REGION_CODE, DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES
+            WHERE IS_CURRENT = 1 AND DISTRICT_CODE IS NOT NULL"""
+    )
+    return groups, cards, districts
 
 
 def _sample_cards():
@@ -45,8 +45,16 @@ def _sample_cards():
     return cards
 
 
-def build_text(client, sample=False):
-    groups, cards = _fetch(client)
+def _cell(text, bold=False):
+    return {'text': {'type': 'bold', 'text': text} if bold else text, 'align': 'center', 'valign': 'middle'}
+
+
+def _num_key(v):
+    return int(v) if str(v).isdigit() else 99
+
+
+def build_blocks(client, sample=False):
+    groups, cards, districts = _fetch(client)
     if sample:
         cards = _sample_cards()
     sprouts = [c for c in cards if _journal_stage(c) == '떡잎']
@@ -55,49 +63,65 @@ def build_text(client, sample=False):
     by_region = {}
     for g in groups:
         by_region.setdefault(g['region_code'], []).append(g)
+    region_districts = {}
+    for d in districts:
+        if d['region_code'] in by_region:
+            region_districts.setdefault(d['region_code'], set()).add(d['district_code'])
+    group_names = sorted({g['group_name'] for g in groups})
+
+    def count(region, ds=None):
+        return sum(1 for c in sprouts if c['region_code'] == region and (ds is None or c['district_code'] in ds))
 
     now = timezone.localtime()
     total_goal = GROUP_SPROUT_GOAL * len(groups)
     pct = round(100 * len(sprouts) / total_goal) if total_goal else 0
-    lines = [
-        '🍀 <b>수지역 떡잎 전광판</b>' + (' <i>(예시 데이터)</i>' if sample else ''),
-        f'<i>{now.month:02d}/{now.day:02d}({_WEEK[now.weekday()]}) {now:%H:%M} 기준</i>',
-        '',
-        f'<b>전체 {len(sprouts)} / {total_goal}</b>  ·  {pct}%',
-    ]
-    # 지역마다: 머리줄(합계·재가 대기) / 반 게이지 / 떡잎 있는 구역만 — 0인 구역까지 다 늘어놓으면 숫자에 묻혀 안 읽혔음
+
+    # 메인 표 — 지역 × 반(n/5, 다 채우면 ✅) + 합계 + 재가 대기
+    main = [[_cell(h) for h in ['지역', *group_names, '합계', '대기']]]
     for region, gs in by_region.items():
-        mine = [c for c in sprouts if c['region_code'] == region]
+        row = [_cell(f'{region}지역')]
+        for name in group_names:
+            g = next((x for x in gs if x['group_name'] == name), None)
+            if not g:
+                row.append(_cell('-'))
+                continue
+            n = count(region, (g['district_codes'] or '').split(','))
+            row.append(_cell(f"{n}/{GROUP_SPROUT_GOAL}{' ✅' if n >= GROUP_SPROUT_GOAL else ''}"))
         waiting = sum(1 for c in pending if c['region_code'] == region)
-        head = f'\n<b>{region}지역</b>  {len(mine)}/{GROUP_SPROUT_GOAL * len(gs)}'
-        if waiting:
-            head += f'  ⏳ 대기 {waiting}'
-        lines.append(head)
-        parts = []
-        for g in gs:
-            ds = (g['district_codes'] or '').split(',')
-            cnt = sum(1 for c in mine if c['district_code'] in ds)
-            parts.append(f"{html.escape(g['group_name'])} {_dots(cnt, GROUP_SPROUT_GOAL)}{'✅' if cnt >= GROUP_SPROUT_GOAL else ''}")
-        lines.append('   '.join(parts))
-        counts = {}
-        for c in mine:
-            counts[c['district_code']] = counts.get(c['district_code'], 0) + 1
-        if counts:
-            lines.append('<i>' + ' · '.join(f'{d}구역 {n}' for d, n in sorted(counts.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else 99)) + '</i>')
+        row += [_cell(f'{count(region)}/{GROUP_SPROUT_GOAL * len(gs)}', bold=True), _cell(str(waiting) if waiting else '-')]
+        main.append(row)
+    main.append([_cell('전체', bold=True), *[_cell('') for _ in group_names],
+                 _cell(f'{len(sprouts)}/{total_goal}', bold=True), _cell(str(len(pending)) if pending else '-', bold=True)])
 
-    # 지인/인도자 명단은 맨 아래 한 박스에 모아 접어둠
-    if sprouts:
-        rows = []
-        for region in by_region:
-            mine = sorted((c for c in sprouts if c['region_code'] == region), key=lambda c: c['district_code'] or '')
-            if mine:
-                rows.append(f'<b>{region}지역</b>')
-                rows += [f"🍀 {html.escape(c['name'] or '-')} / <i>{html.escape(c['author_name'] or '-')}</i>  ({c['district_code']}구역)" for c in mine]
-        lines += ['', '<b>🍀 떡잎 명단</b>', '<blockquote expandable>' + '\n'.join(rows) + '</blockquote>']
-    return '\n'.join(lines)
+    # 구역별 표 — 지역 × 구역, 그 지역에 없는 구역은 빈칸
+    all_d = sorted({d for ds in region_districts.values() for d in ds}, key=_num_key)
+    district_table = [[_cell('지역'), *[_cell(f'{d}구역') for d in all_d]]]
+    for region in by_region:
+        mine = region_districts.get(region, set())
+        district_table.append([_cell(f'{region}지역'),
+                               *[_cell(str(count(region, [d])) if d in mine else '') for d in all_d]])
 
+    # 명단 — 지역별 접이식, 안에 구역/지인/인도자 표
+    roster = []
+    for region in by_region:
+        mine = sorted((c for c in sprouts if c['region_code'] == region), key=lambda c: _num_key(c['district_code']))
+        if mine:
+            cells = [[_cell('구역'), _cell('지인'), _cell('인도자')]]
+            cells += [[_cell(f"{c['district_code']}구역"), _cell(c['name'] or '-'), _cell(c['author_name'] or '-')] for c in mine]
+            roster.append({'type': 'details', 'summary': f'{region}지역 ({len(mine)})', 'blocks': [{'type': 'table', 'cells': cells}]})
 
-_MARKUP = {'inline_keyboard': [[{'text': '🏞️ 밭 관리하기에서 보기', 'url': 'https://page.ddochi.cloud/#/shortCardList'}]]}
+    title = '🍀 수지역 떡잎 전광판' + (' (예시 데이터)' if sample else '')
+    blocks = [
+        {'type': 'heading', 'text': title, 'size': 2},
+        {'type': 'paragraph', 'text': f'전체 {len(sprouts)} / {total_goal} ({pct}%) · 반마다 떡잎 {GROUP_SPROUT_GOAL}개 유지'},
+        {'type': 'table', 'cells': main},
+        {'type': 'details', 'summary': '구역별 떡잎', 'is_open': True, 'blocks': [{'type': 'table', 'cells': district_table}]},
+    ]
+    if roster:
+        blocks.append({'type': 'details', 'summary': '떡잎 명단 (지인 / 인도자)', 'blocks': roster})
+    blocks.append({'type': 'footer', 'text': {'type': 'italic',
+                                              'text': f'{now.month}/{now.day}({_WEEK[now.weekday()]}) {now:%H:%M} 기준'}})
+    return blocks
 
 
 def send_sprout_board(client, sample=False):
@@ -106,6 +130,6 @@ def send_sprout_board(client, sample=False):
     if not chat_id:
         return {'skipped': True, 'reason': 'no_chat_id'}
     return send_fresh_dashboard(
-        client, TEAM_ID, chat_id, build_text(client, sample), _MARKUP, cfg,
-        'lastSproutBoardMsgId', 'lastSproutBoardMsgDate', 'sprout_board',
+        client, TEAM_ID, chat_id, None, _MARKUP, cfg,
+        'lastSproutBoardMsgId', 'lastSproutBoardMsgDate', 'sprout_board', rich_blocks=build_blocks(client, sample),
     )

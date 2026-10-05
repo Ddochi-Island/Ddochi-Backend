@@ -259,7 +259,7 @@ class SproutDeciderTests(SimpleTestCase):
 
 
 class SproutBoardTests(SimpleTestCase):
-    def test_counts_names_pending_and_table(self):
+    def test_rich_blocks_counts_districts_and_roster(self):
         from api.telegram import sprout_board as b
         full = {f: 'x' for f in ['age', 'gender', 'phone', 'residence', 'school_major', 'environment', 'relation',
                                  'personality', 'hobby', 'has_partner', 'family_relation', 'desired_image',
@@ -268,10 +268,13 @@ class SproutBoardTests(SimpleTestCase):
                   {'region_code': '1', 'group_name': '2반', 'district_codes': '3'}]
         cards = [{**full, 'region_code': '1', 'district_code': '1', 'name': '<지인>', 'author_name': '인도자', 'sprout_status': 'approved'},
                  {**full, 'region_code': '1', 'district_code': '3', 'name': 'b', 'author_name': 'c', 'sprout_status': 'pending'}]
-        with patch.object(b, '_fetch', return_value=(groups, cards)):
-            text = b.build_text(None)
-        self.assertIn('<b>전체 1 / 10</b>', text)
-        self.assertIn('&lt;지인&gt; / <i>인도자</i>', text)
-        self.assertIn('⏳ 대기 1', text)
-        self.assertIn('<i>1구역 1</i>', text)
-        self.assertIn('1반 ●○○○○   2반 ○○○○○', text)
+        districts = [{'region_code': '1', 'district_code': d} for d in ('1', '2', '3')]
+        with patch.object(b, '_fetch', return_value=(groups, cards, districts)):
+            blocks = b.build_blocks(None)
+        main = blocks[2]['cells']
+        texts = lambda row: [c['text']['text'] if isinstance(c['text'], dict) else c['text'] for c in row]
+        self.assertEqual(texts(main[0]), ['지역', '1반', '2반', '합계', '대기'])
+        self.assertEqual(texts(main[1]), ['1지역', '1/5', '0/5', '1/10', '1'])
+        self.assertEqual(texts(blocks[3]['blocks'][0]['cells'][1]), ['1지역', '1', '0', '0'])
+        roster = blocks[4]['blocks'][0]['blocks'][0]['cells']
+        self.assertEqual(texts(roster[1]), ['1구역', '<지인>', '인도자'])

@@ -23,15 +23,24 @@ def in_broadcast_window(start_hour=6, end_hour=23):
     return start_hour <= timezone.localtime().hour <= end_hour
 
 
-def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, msg_id_field, msg_date_field, log_tag):
-    """cfg는 호출부가 이미 조회해둔 team config — chat_id/이전 메시지 정보 재사용."""
+def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, msg_id_field, msg_date_field, log_tag,
+                         rich_blocks=None):
+    """cfg는 호출부가 이미 조회해둔 team config — chat_id/이전 메시지 정보 재사용.
+    rich_blocks를 주면 text 대신 sendRichMessage(Bot API 10.1 블록 — 표/접이식/제목)로 보냄. 리치 메시지에
+    인라인 버튼이 거부되면 버튼 없이 한 번 더 시도."""
     today = timezone.localdate().isoformat()
+    if rich_blocks is not None:
+        method, payload = 'sendRichMessage', {'chat_id': chat_id, 'rich_message': {'blocks': rich_blocks}, 'reply_markup': reply_markup}
+    else:
+        method, payload = 'sendMessage', {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': reply_markup}
     try:
-        result = tel_router_client.enqueue(
-            'sendMessage', {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': reply_markup}, await_result=True,
-        )
+        result = tel_router_client.enqueue(method, payload, await_result=True)
+        if not result.get('ok') and rich_blocks is not None:
+            logger.warning('[%s] rich send rejected (%s), retrying without buttons', log_tag, result.get('description'))
+            payload.pop('reply_markup', None)
+            result = tel_router_client.enqueue(method, payload, await_result=True)
     except Exception:
-        logger.warning('[%s] send_fresh sendMessage failed', log_tag, exc_info=True)
+        logger.warning('[%s] send_fresh %s failed', log_tag, method, exc_info=True)
         return {'sent': False}
 
     if not result.get('ok'):
