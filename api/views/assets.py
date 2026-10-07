@@ -1923,9 +1923,11 @@ def shed_pending_rejected_list(request, *args, **kwargs):
     client = DataRouterClient()
     rows = client.query(
         """SELECT q.INTAKE_ID, q.NAME, q.PHONE, q.AGE, q.MBTI, q.SOURCE_LINK, q.REGION_NAME, q.REACTION,
-                  q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
+                  q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, imah.REGION_CODE AS INTRODUCER_REGION,
+                  q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
              FROM SARANG_INTAKE_QUEUE q
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES imah ON imah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND imah.IS_CURRENT = 1
             WHERE q.STATUS = 'rejected'
             ORDER BY q.REVIEWED_AT DESC"""
     )
@@ -1934,6 +1936,7 @@ def shed_pending_rejected_list(request, *args, **kwargs):
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
+        'introducerRegion': r['introducer_region'],
         'helperNames': _helper_names(r['helper_member_ids']),
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]
