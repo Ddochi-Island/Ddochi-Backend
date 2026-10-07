@@ -9,6 +9,7 @@ from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import send_fresh_matching_dashboard
 from api.telegram.prospect_dashboard import send_fresh_prospect_dashboard
 from api.telegram.sprout_board import send_sprout_board
+from api.telegram.team_config import load_all_team_configs
 from api.telegram.shed_union_dashboards import send_fresh_shed_sched, send_fresh_shed_tm, send_fresh_shed_unified
 from api.telegram.team_config import cron_job_enabled, list_prospect_chat_team_ids, list_stats_chat_team_ids, load_team_config
 from api.telegram.team_stats import send_fresh_team_stats
@@ -373,3 +374,34 @@ def send_sprout_board_view(request, *args, **kwargs):
     except (TypeError, ValueError, AttributeError):
         sample = False
     return JsonResponse({'success': True, 'result': send_sprout_board(DataRouterClient(), sample)})
+
+
+# 지역별 shed 현황판 3종(2026-10-08 지역별 운영) — 연합 판과 같은 코드를 지역 코드로 호출. 텔레그램 설정 지역 탭에서
+# 방을 연결한 판만, 지역 탭 발송 잡 토글(cronJobs)로 끌 수 있음.
+_REGION_SHED_BOARDS = (
+    ('shedUnifiedChatId', 'sendRegionShedUnified', send_fresh_shed_unified),
+    ('tmDashChatId', 'sendRegionShedTm', send_fresh_shed_tm),
+    ('schedDashChatId', 'sendRegionShedSched', send_fresh_shed_sched),
+)
+
+
+@csrf_exempt
+def send_region_shed_dashboards(request, *args, **kwargs):
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    client = DataRouterClient()
+    regions = [str(n) for n in range(1, 7)]
+    configs = load_all_team_configs(client, regions)
+    results = {}
+    for region in regions:
+        cfg = configs.get(region) or {}
+        for field, handler, send in _REGION_SHED_BOARDS:
+            if not cfg.get(field) or not cron_job_enabled(cfg, handler):
+                continue
+            try:
+                results[f'{region}:{handler}'] = send(client, region)
+            except Exception as e:
+                results[f'{region}:{handler}'] = {'sent': False, 'error': str(e)}
+    return JsonResponse({'success': True, 'results': results})

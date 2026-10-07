@@ -16,7 +16,7 @@ from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient, DataRouterError
 from api.telegram.habjaeyang import send_habjaeyang_to_telegram
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
-from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
+from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_groups_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
 
 
@@ -697,8 +697,7 @@ def submit_result(request, *args, **kwargs):
         return JsonResponse({'success': False, 'message': f'아직 지원 안 되는 처리예요: {log_type}'}, status=400)
 
     if log_type in TM_RESULT or log_type == '티엠예약':
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_tm(client, group)
                 refresh_shed_sched(client, group)
@@ -733,8 +732,7 @@ def delete_log(request, *args, **kwargs):
         if row['result'] == 'MEET_FIX':
             stmts.append({'sql': "UPDATE SARANG SET STAGE = '티엠' WHERE SARANG_ID = :1", 'args': [sarang_id]})
         client.tx(stmts)
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_tm(client, group)
                 refresh_shed_sched(client, group)
@@ -755,8 +753,7 @@ def delete_log(request, *args, **kwargs):
         )
         if not affected:
             return JsonResponse({'success': False, 'message': '로그를 찾을 수 없어요'}, status=404)
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_unified(client, group)
                 refresh_shed_tm(client, group)
@@ -1013,8 +1010,7 @@ def update_approval(request, *args, **kwargs):
             refresh_team_stats_for_sarang(client, sarang_id)
         except Exception:
             logging.getLogger('api.views.assets').warning('[update_approval] team stats refresh failed', exc_info=True)
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_unified(client, group)
                 refresh_shed_tm(client, group)
@@ -1410,8 +1406,7 @@ def shed_register(request, *args, **kwargs):
         'args': [sabun, intake_id],
     })
     client.tx(stmts)
-    group = shed_union_for_sarang(client, sarang_id)
-    if group:
+    for group in shed_groups_for_sarang(client, sarang_id):
         try:
             refresh_shed_tm(client, group)
             refresh_shed_sched(client, group)
@@ -1898,9 +1893,11 @@ def shed_pending_list(request, *args, **kwargs):
     client = DataRouterClient()
     rows = client.query(
         """SELECT q.INTAKE_ID, q.NAME, q.PHONE, q.AGE, q.MBTI, q.SOURCE_LINK, q.REGION_NAME, q.REACTION,
-                  q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
+                  q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, imah.REGION_CODE AS INTRODUCER_REGION,
+                  q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
              FROM SARANG_INTAKE_QUEUE q
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES imah ON imah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND imah.IS_CURRENT = 1
             WHERE q.STATUS = 'submitted'
             ORDER BY q.CREATED_AT ASC"""
     )
@@ -1909,6 +1906,7 @@ def shed_pending_list(request, *args, **kwargs):
         'intakeId': r['intake_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'],
         'mbti': r['mbti'], 'sourceLink': r['source_link'], 'regionName': r['region_name'], 'reaction': r['reaction'],
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
+        'introducerRegion': r['introducer_region'],  # 합당한자(지역별) 화면 필터용 — 유입자 소속
         'helperNames': _helper_names(r['helper_member_ids']),
         'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
     } for r in rows]

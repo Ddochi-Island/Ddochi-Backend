@@ -60,3 +60,4 @@ register('sendShedTmDashboard246', make_main_cron_handler('sendShedTmDashboard24
 register('sendShedSchedDashboard135', make_main_cron_handler('sendShedSchedDashboard135', '/internal/cron/send-shed-sched-dashboard'))
 register('sendShedSchedDashboard246', make_main_cron_handler('sendShedSchedDashboard246', '/internal/cron/send-shed-246-sched-dashboard'))
 register('sendSproutBoard', make_main_cron_handler('sendSproutBoard', '/internal/cron/send-sprout-board'))
+register('sendRegionShedDashboards', make_main_cron_handler('sendRegionShedDashboards', '/internal/cron/send-region-shed-dashboards'))

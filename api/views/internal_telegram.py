@@ -11,7 +11,7 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.habjaeyang import HJ_REJECT_REASONS, refresh_hj_markup, refresh_hj_reason_markup
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
-from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_union_for_sarang
+from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_groups_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
 from api.views.assets import _member_id_by_name, _set_habjaeyang_approval, _toggle_hj_field
 
@@ -63,8 +63,7 @@ def _handle_hj(client, args, chat_id, message_id, telegram_id):
         if result is None:
             return {'toast': '⚠️ 합재양 없음'}
         refresh_hj_markup(client, sarang_id, chat_id, message_id)
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_unified(client, group)
             except Exception:
@@ -84,8 +83,7 @@ def _handle_hj(client, args, chat_id, message_id, telegram_id):
         if new_val is None:
             return {'toast': '⚠️ 합재양 없음'}
         refresh_hj_markup(client, sarang_id, chat_id, message_id)
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_unified(client, group)
             except Exception:
@@ -120,8 +118,7 @@ def _handle_hj(client, args, chat_id, message_id, telegram_id):
             logging.getLogger('api.views.internal_telegram').warning(
                 '[handle_hj:approve] team stats refresh failed', exc_info=True,
             )
-        group = shed_union_for_sarang(client, sarang_id)
-        if group:
+        for group in shed_groups_for_sarang(client, sarang_id):
             try:
                 refresh_shed_unified(client, group)
                 refresh_shed_tm(client, group)

@@ -281,3 +281,19 @@ class SproutBoardTests(SimpleTestCase):
         self.assertEqual(texts(blocks[2]['blocks'][0]['cells'][1]), ['1지역', '1', '0', '0', '1'])
         roster = blocks[3]['blocks'][0]['blocks'][0]['cells']
         self.assertEqual(texts(roster[1]), ['1구역', '<지인>', '인도자'])
+
+
+class RegionShedBoardTests(SimpleTestCase):
+    def test_region_group_resolves_to_single_region(self):
+        from api.telegram import shed_union_dashboards as u
+        self.assertEqual(u._union_regions(None, '3'), ['3'])
+        self.assertEqual(u._team_id_for_group('3'), '3')
+        self.assertEqual(u._team_id_for_group('135'), '135 연합')
+        self.assertEqual(u._group_label('3'), '3지역')
+        self.assertEqual(u._group_label('246'), '질적찾기')
+
+    def test_region_timetable_uses_135_style(self):
+        from api.telegram.shed_union_dashboards import _sched_person
+        r = {'caller_name': None, 'introducer_name': '유입', 'sender_name': '선문자'}
+        self.assertEqual(_sched_person('4', r), '선문자')
+        self.assertEqual(_sched_person('246', r), '유입')

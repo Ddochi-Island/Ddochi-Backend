@@ -129,7 +129,8 @@ def telegram_pair_complete(request, *args, **kwargs):
                 '[telegram_pair_complete] stats dashboard initial send failed', exc_info=True,
             )
     elif channel_type in ('shedUnified', 'tmDash', 'schedDash'):
-        group = '135' if team_id == '135 연합' else '246'
+        # 연합 탭이면 '135'/'246', 지역 탭이면 지역 코드 그대로(2026-10-08 지역별 운영)
+        group = {'135 연합': '135', '246 연합': '246'}.get(team_id, team_id)
         fn = {'shedUnified': send_fresh_shed_unified, 'tmDash': send_fresh_shed_tm, 'schedDash': send_fresh_shed_sched}[channel_type]
         try:
             fn(client, group)

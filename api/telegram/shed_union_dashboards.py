@@ -28,9 +28,14 @@ def _fmt_md(date_str):
     return f"{d.month:02d}/{d.day:02d}({_WEEK[(d.weekday() + 1) % 7]})"
 
 
+UNION_GROUPS = ('135', '246')
+
+
 def _union_regions(client, group):
-    """group: '135' 또는 '246'. 활성 REGION_CODE 중 숫자로 변환 가능한 것만 홀/짝
-    판정 — REGION_CODE가 숫자 문자열이 아닌 경우(있다면)는 걸러짐."""
+    """group: '135'/'246'(연합) 또는 지역 코드('1'~'6', 2026-10-08 지역별 운영 — 그 지역 하나). 연합이면 활성
+    REGION_CODE 중 숫자로 변환 가능한 것만 홀/짝 판정 — REGION_CODE가 숫자 문자열이 아닌 경우(있다면)는 걸러짐."""
+    if group not in UNION_GROUPS:
+        return [group]
     rows = client.query(
         "SELECT DISTINCT REGION_CODE FROM MEMBER_AFFILIATION_HISTORIES WHERE IS_CURRENT = 1 AND REGION_CODE IS NOT NULL",
         [],
@@ -49,7 +54,26 @@ def _union_regions(client, group):
 
 
 def _team_id_for_group(group):
-    return '135 연합' if group == '135' else '246 연합'
+    """설정(BROADCAST_SETTINGS) 위치 — 연합은 가상 팀, 지역은 그 지역 team config."""
+    return {'135': '135 연합', '246': '246 연합'}.get(group, group)
+
+
+def _group_label(group):
+    return {'135': '선한양치기', '246': '질적찾기'}.get(group, f'{group}지역')
+
+
+def shed_groups_for_sarang(client, sarang_id):
+    """이벤트훅용 — 이 사랑이를 보여주는 판들(연합 + 지역). 지역 판은 그 지역 방이 연결돼 있을 때만 실제로 갱신됨."""
+    union = shed_union_for_sarang(client, sarang_id)
+    if not union:
+        return []
+    region = client.query_one(
+        """SELECT mah.REGION_CODE FROM SARANG s
+             JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
+            WHERE s.SARANG_ID = :1""",
+        [sarang_id],
+    )
+    return [union] + ([region['region_code']] if region and region['region_code'] else [])
 
 
 def shed_union_for_sarang(client, sarang_id):
@@ -181,7 +205,7 @@ def _build_message_unified(client, group):
     rows = _fetch_unified_rows(client, regions)
     region_configs = load_all_team_configs(client, regions)
     region_chat_map = {r: (cfg.get('prospectChatId') or cfg.get('matchingChatId')) for r, cfg in region_configs.items()}
-    title = f"{'선한양치기' if group == '135' else '질적찾기'} 통합 찾기 현황판"
+    title = f"{_group_label(group)} 통합 찾기 현황판"
     return _build_unified_text(group, title, rows, region_chat_map)
 
 
@@ -387,7 +411,7 @@ def _build_message_tm(client, group):
     regs = _fetch_tm_registrations(client, regions, date_str)
     logs = _fetch_tm_logs(client, regions, date_str)
     approvals = _fetch_tm_approvals(client, regions, date_str)
-    label = '선한양치기' if group == '135' else '질적찾기'
+    label = _group_label(group)
     return _build_tm_text(group, label, regs, logs, approvals)
 
 
@@ -511,8 +535,8 @@ def _fetch_pending_count(client, regions):
 
 def _sched_person(group, r):
     """마지막 칸. 135는 '섭자/지역/유입자/선문자자'(2026-10-03 요청): 유입자 말고 다른 사람이 예약 티엠을 잡았으면
-    그 사람, 아니면 선문자 보낸 사람, 안 보냈으면 빈칸. 246은 기존대로 통화자(없으면 유입자)."""
-    if group == '135':
+    그 사람, 아니면 선문자 보낸 사람, 안 보냈으면 빈칸. 지역별 판도 135식(2026-10-08). 246만 기존대로 통화자(없으면 유입자)."""
+    if group != '246':
         if r['caller_name'] and r['caller_name'] != r['introducer_name']:
             return r['caller_name']
         return r.get('sender_name') or ''
@@ -573,7 +597,7 @@ def _build_message_sched(client, group):
     regions = _union_regions(client, group)
     rows = _fetch_reservations(client, regions)
     pending = _fetch_pending_count(client, regions)
-    label = '선한양치기' if group == '135' else '질적찾기'
+    label = _group_label(group)
     return _build_sched_text(group, label, rows, pending)
 
 
