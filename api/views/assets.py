@@ -1395,8 +1395,8 @@ def shed_register(request, *args, **kwargs):
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
     stmts.append({
         'sql': """INSERT INTO SARANG_INFLOW_DETAILS
-                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT, SOURCE_LINK)
-                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT, SOURCE_LINK
+                    (SARANG_ID, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT, SOURCE_LINK, APPLIED_AT)
+                  SELECT :1, REGION_NAME, REACTION, LOCATION, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS, TM_RESERVED_AT, SOURCE_LINK, APPLIED_AT
                     FROM SARANG_INTAKE_QUEUE WHERE INTAKE_ID = :2""",
         'args': [sarang_id, intake_id],
     })
@@ -1447,7 +1447,7 @@ def get_shed_prospects(request, *args, **kwargs):
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   m.NAME AS INFLOW_MEMBER_NAME, mah.REGION_CODE AS TEAM,
                   sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV,
-                  im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS,
+                  im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS, sid.APPLIED_AT,
                   -- 가장 최근 '티엠예약' 통화 기록의 예약 시각 우선, 없으면 shed 이관 때 잡은 예약 시각
                   COALESCE((SELECT MAX(tl.RESERVED_TM_AT) KEEP (DENSE_RANK LAST ORDER BY tl.CREATED_AT)
                               FROM TM_LOGS tl
@@ -1559,6 +1559,7 @@ def get_shed_prospects(request, *args, **kwargs):
                 'introducerName': r['introducer_name'],
                 'helperNames': _helper_names(r['helper_member_ids']),
                 'tmReservedAt': r['tm_reserved_at'],
+                'appliedAt': r['applied_at'],  # shed 신청 시각(없으면 None — GAS가 보내기 전 건)
             },
             'habJaeYang': {
                 'guideName': r['guide_name'],
@@ -1758,6 +1759,20 @@ def _intake_people(client, body):
 _shed_log = logging.getLogger('api.views.assets')
 
 
+def _shed_applied_at(v):
+    """shed 신청 시각(시트 A열, GAS가 ISO로 보냄) → UTC 'YYYY-MM-DD HH:MM:SS'. 시간대 없으면 KST로 봄. 못 읽으면 None."""
+    v = str(v or '').strip()
+    if not v:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(v.replace('Z', '+00:00').replace(' ', 'T'))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo('Asia/Seoul'))
+    return dt.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def _shed_tm_datetime(v):
     """TO_TIMESTAMP 'YYYY-MM-DD"T"HH24:MI'에 맞춤 — 초/공백 구분('2026-10-03 19:00:00')이 오면 ORA-01830으로 500 났음."""
     v = str(v or '').strip().replace(' ', 'T')
@@ -1838,6 +1853,7 @@ def _shed_webhook(request):
     tm_location = str(body.get('tmLocation') or '').strip() or None
     tm_datetime = _shed_tm_datetime(body.get('tmDatetime'))
     rest_type = str(body.get('rest') or '').strip() or None
+    applied_at = _shed_applied_at(body.get('appliedAt'))  # shed 신청 시각 — 합당한자 전 지역 공개 기준
     mbti = str(body.get('mbti') or '').strip() or None
 
     if not name or len(phone_normalized) < 10:
@@ -1872,12 +1888,14 @@ def _shed_webhook(request):
         """INSERT INTO SARANG_INTAKE_QUEUE
              (INTAKE_ID, NAME, PHONE, PHONE_NORMALIZED, AGE, MBTI, SOURCE_LINK,
               REGION_NAME, REACTION, LOCATION, REST_TYPE, STATUS, ENV, INTRODUCER_MEMBER_ID, HELPER_MEMBER_IDS,
-              TM_RESERVED_AT)
+              TM_RESERVED_AT, APPLIED_AT)
            VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15,
-                   CASE WHEN :16 IS NOT NULL THEN TO_TIMESTAMP(:16, 'YYYY-MM-DD"T"HH24:MI') END)""",
+                   CASE WHEN :16 IS NOT NULL THEN TO_TIMESTAMP(:17, 'YYYY-MM-DD"T"HH24:MI') END,
+                   CASE WHEN :18 IS NOT NULL THEN FROM_TZ(TO_TIMESTAMP(:19, 'YYYY-MM-DD HH24:MI:SS'), 'UTC') END)""",
         [intake_id, name, phone_raw, phone_normalized, age, mbti, int(event),
          region, reaction, tm_location, rest_type,
-         'submitted' if is_transfer else 'pending', env, introducer_id, helper_ids_str, tm_datetime],
+         'submitted' if is_transfer else 'pending', env, introducer_id, helper_ids_str, tm_datetime, tm_datetime,
+         applied_at, applied_at],
     )
     return JsonResponse({'ok': True, 'skipped': False, 'intakeId': intake_id})
 
@@ -1894,7 +1912,7 @@ def shed_pending_list(request, *args, **kwargs):
     rows = client.query(
         """SELECT q.INTAKE_ID, q.NAME, q.PHONE, q.AGE, q.MBTI, q.SOURCE_LINK, q.REGION_NAME, q.REACTION,
                   q.LOCATION, q.ENV, im.NAME AS INTRODUCER_NAME, imah.REGION_CODE AS INTRODUCER_REGION,
-                  q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT
+                  q.HELPER_MEMBER_IDS, q.TM_RESERVED_AT, q.CREATED_AT, q.APPLIED_AT
              FROM SARANG_INTAKE_QUEUE q
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = q.INTRODUCER_MEMBER_ID
              LEFT JOIN MEMBER_AFFILIATION_HISTORIES imah ON imah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND imah.IS_CURRENT = 1
@@ -1908,7 +1926,7 @@ def shed_pending_list(request, *args, **kwargs):
         'location': r['location'], 'env': r['env'], 'introducerName': r['introducer_name'],
         'introducerRegion': r['introducer_region'],  # 합당한자(지역별) 화면 필터용 — 유입자 소속
         'helperNames': _helper_names(r['helper_member_ids']),
-        'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'],
+        'tmReservedAt': r['tm_reserved_at'], 'createdAt': r['created_at'], 'appliedAt': r['applied_at'],
     } for r in rows]
     return JsonResponse({'success': True, 'list': list_})
 
