@@ -37,6 +37,14 @@ _JOURNAL_FIELDS = [
 ]
 
 
+# 농부일지 저장 시 자를 길이 — SHORT_CARDS 컬럼 길이(sql/30 이후)와 맞춤
+_JOURNAL_MAX_CHARS = {
+    'GENDER': 10, 'HAS_PARTNER': 500, 'RELATION': 500, 'SCHOOL_MAJOR': 500, 'RESIDENCE': 500,
+    'PERSONALITY': 1000, 'HOBBY': 1000, 'FAMILY_RELATION': 1000, 'DESIRED_IMAGE': 1000, 'RECENT_CONCERN': 1000,
+    'FAMILY_ATMOSPHERE': 1000, 'HUMAN_RELATIONS': 1000, 'GUIDE_COMMENT': 1000, 'NOTE_SPECIAL': 1000, 'ENVIRONMENT': 1000,
+}
+
+
 def _json_body(request):
     try:
         return json.loads(request.body or b'{}')
@@ -472,6 +480,10 @@ def save_short_card_journal(request, *args, **kwargs):
             continue
         val = data[key]
         val = str(val).strip() or None if val is not None else None
+        if val and col == 'AGE':
+            val = re.sub(r'\D', '', val)[:3] or None  # NUMBER 컬럼 — '22살'도 저장되게
+        elif val and col in _JOURNAL_MAX_CHARS:
+            val = val[:_JOURNAL_MAX_CHARS[col]]  # 칸 길이 넘으면 ORA-12899로 저장 전체가 실패했음 — 넘는 부분만 자름
         sets.append(f'{col} = :{n}')
         args_.append(val)
         n += 1
