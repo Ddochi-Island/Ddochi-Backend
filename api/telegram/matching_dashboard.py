@@ -113,7 +113,6 @@ def _build_text(team_id, rows):
     # 실제 표시 범위는 여기서 자름.
     window_start = today
     window_end = today + datetime.timedelta(days=3)
-    now_key = timezone.localtime().strftime('%Y-%m-%d %H:%M')  # 만남 시각은 KST 벽시계 값
 
     by_sarang = {}
     for r in rows:
@@ -136,8 +135,6 @@ def _build_text(team_id, rows):
                 'name': r['pi_name'] or '', 'guide': r['guide_name'] or '',
                 'teacher': r['teacher_name'] or '', 'outcome': _outcome(r, nxt),
                 'region': r['region'] or '-', 'sarang_id': r['sarang_id'],
-                # 만남 시각이 지났는데 결과 없음 → 결과 입력 명령 노출
-                'past': bool(r['mt_date'] and f"{r['mt_date']} {r['mt_time'] or '00:00'}" <= now_key),
             })
 
     title = '📢 수지역 매칭 현황판' if is_all else f'📢 {team_id}지역 매칭 현황판'
@@ -155,17 +152,17 @@ def _build_text(team_id, rows):
                 # 전체(수지역) 보드만 지역 태그를 맨 앞에 붙임 — 개별 지역 보드는 기존 그대로.
                 region_prefix = f"{it['region']}지역|" if is_all else ''
                 lines.append(f"<code>{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
-                # 아직 결과 없는 건에 탭형 명령 노출 — 교사가 없으면 '입력', 이미 있으면 '수정'(같은
-                # 명령이 덮어씀, 이름 자리에 '-'를 쓰면 해제). 개별 지역 보드 한정(수지역 통합 보드는
-                # 대상 아님). 8자리 서픽스라 <code> 밖 평문으로 둬야 텔레그램이 bot_command로 인식해서
-                # 탭하면 입력창에 자동완성됨(32자 넘으면 인식 안 됨).
-                if not is_all and not it['outcome']:
-                    label = '교사 수정' if it['teacher'] else '교사 입력'
-                    lines.append(f"　　└ {label}: /t_{it['sarang_id'][-8:]} 이름")
-                    if it['past']:
-                        lines.append(f"　　└ 결과 입력: /r_{it['sarang_id'][-8:]}")
             lines.append('')
 
+    if not is_all:
+        # 교사/결과 입력 명령 안내 — 행마다 코드 명령을 달면 현황판이 길고 지저분해서(사용자 요청 2026-10-08)
+        # 이름으로 쓰는 명령을 접이식으로 한 번만. <code>라 탭해도 바로 전송되지 않고 복사됨.
+        lines.append('<blockquote expandable>📝 명령어 안내 (눌러서 펼치기)\n'
+                     '🎓 교사 입력: <code>/t 섭외자 교사</code>\n'
+                     '   예) <code>/t 홍길동 김철수</code> · 타지역 교사 <code>/t 홍길동 김철수(타지역)</code> · 해제 <code>/t 홍길동 -</code>\n'
+                     '🛡️ 결과 입력: <code>/r 섭외자</code>\n'
+                     '   예) <code>/r 홍길동</code> → 버튼으로 결과 고르기(밀림·2차만남은 날짜를 답장으로)\n'
+                     '같은 이름이 여럿이면 봇이 날짜별로 골라 달라고 해요</blockquote>')
     lines.append('➖➖➖➖➖➖➖➖➖➖')
     text = '\n'.join(lines)
     return text[:4000] + ('\n…' if len(text) > 4000 else '')

@@ -12,6 +12,7 @@ from api.telegram.habjaeyang import HJ_REJECT_REASONS, refresh_hj_markup, refres
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram import match_result_input
+from api.telegram.name_lookup import find_open_matches
 from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_groups_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
 from api.views.assets import _member_id_by_name, _set_habjaeyang_approval, _toggle_hj_field
@@ -189,12 +190,31 @@ def telegram_teacher_assign(request, *args, **kwargs):
     body = _json_body(request)
     short_code = str(body.get('shortCode') or '').strip()
     teacher_name = str(body.get('teacherName') or '')
+    client = DataRouterClient()
+    name = str(body.get('name') or '').strip()
+    if name and not short_code:  # "/t 섭외자 교사" — 이름으로 그 방 지역의 매칭 건 찾기
+        found = find_open_matches(client, name, body.get('chatId'))
+        if not found:
+            return JsonResponse({'ok': False, 'message': f'⚠️ [{name}] 진행 중인 매칭을 이 지역에서 못 찾았어'})
+        if len(found) > 1:
+            return JsonResponse({'ok': False, 'message': _pick_message(name, found, 't', teacher_name)})
+        short_code = found[0]['short']
     if not short_code:
         return JsonResponse({'ok': False, 'message': '⚠️ 잘못된 요청'})
 
-    client = DataRouterClient()
     result = _assign_teacher(client, short_code, teacher_name)
     return JsonResponse(result)
+
+
+def _pick_message(name, found, cmd, teacher_name=''):
+    """같은 이름이 여러 명 — 날짜/인도자와 함께 그 건의 코드 명령을 보여줌. 결과(/r_)는 탭하면 바로 실행되고,
+    교사(/t_)는 교사 이름까지 붙인 명령을 복사해서 보내게 <code>로."""
+    lines = [f'⚠️ [{name}]이(가) {len(found)}명이야. 아래에서 골라줘']
+    for f in found:
+        command = f"/{cmd}_{f['short'].lower()}"
+        shown = f'<code>{command} {teacher_name}</code>' if cmd == 't' else command
+        lines.append(f"· {f['mt']} 인도자 {f['guide']} → {shown}")
+    return '\n'.join(lines)
 
 
 @csrf_exempt
@@ -234,9 +254,18 @@ def telegram_match_result(request, *args, **kwargs):
     short = str(body.get('shortCode') or '').strip().upper()
     chat_id = body.get('chatId')
     telegram_id = str(body.get('fromId') or '').strip() or None
+    client = DataRouterClient()
+    name = str(body.get('name') or '').strip()
+    if name and not short and chat_id is not None:  # "/r 섭외자"
+        found = find_open_matches(client, name, chat_id)
+        if len(found) != 1:
+            text = (_pick_message(name, found, 'r') if found
+                    else f'⚠️ [{name}] 결과를 넣을 매칭을 이 지역에서 못 찾았어')
+            match_result_input._send(chat_id, text, reply_to=body.get('replyTo'))
+            return JsonResponse({'ok': True})
+        short = found[0]['short']
     if not short or chat_id is None:
         return JsonResponse({'ok': False})
-    client = DataRouterClient()
     if body.get('mode') == 'date':
         kind = str(body.get('kind') or '')
         if kind not in match_result_input.POSTPONE:

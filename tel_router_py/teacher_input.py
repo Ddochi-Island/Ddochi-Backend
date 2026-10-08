@@ -1,4 +1,4 @@
-# 매칭현황판의 "/t_<sarang_id 뒤 8자리> 이름" 탭형 명령 처리 — pairing.py와 동일한 구조.
+# 매칭현황판 교사 입력 — "/t 섭외자 교사"(이름) 또는 "/t_<sarang_id 뒤 8자리> 교사"(같은 이름이 여럿일 때). pairing.py와 동일한 구조.
 import logging
 import re
 
@@ -8,10 +8,14 @@ import telegram_client
 logger = logging.getLogger('tel_router.teacher_input')
 
 TEACHER_CMD_RE = re.compile(r'^/t_([0-9a-fA-F]{8})(?:@\S+)?(?:\s+(.+))?$', re.DOTALL)
+# "/t 섭외자 교사" — 이름으로(2026-10-08, 현황판 행마다 코드 명령을 다는 대신). 섭외자 찾기는 main이 그 방 지역에서.
+TEACHER_NAME_RE = re.compile(r'^/t(?:@\S+)?(?:\s+(\S+)(?:\s+(.+))?)?$', re.DOTALL)
+USAGE = '🎓 <code>/t 섭외자 교사</code> 처럼 보내줘. 예) <code>/t 홍길동 김철수</code> (타지역 교사는 <code>김철수(타지역)</code>, 해제는 <code>-</code>)'
 
 
 def is_teacher_command(text):
-    return bool(TEACHER_CMD_RE.match(text.strip()))
+    t = text.strip()
+    return bool(TEACHER_CMD_RE.match(t) or TEACHER_NAME_RE.match(t))
 
 
 def parse_teacher_command(text):
@@ -36,16 +40,23 @@ async def handle_teacher_message(http_client, message):
         return
 
     short_code, teacher_name = parse_teacher_command(text)
-    if not short_code:
-        return
-    if not teacher_name:
-        _reply(chat_id, f'🎓 교사 이름도 같이 적어줘. 예) <code>/t_{short_code.lower()} 홍길동</code>', reply_to)
-        return
+    body = {'chatId': chat_id}
+    if short_code:
+        if not teacher_name:
+            _reply(chat_id, f'🎓 교사 이름도 같이 적어줘. 예) <code>/t_{short_code.lower()} 홍길동</code>', reply_to)
+            return
+        body.update(shortCode=short_code, teacherName=teacher_name)
+    else:
+        m = TEACHER_NAME_RE.match(text)
+        if not m or not m.group(1) or not (m.group(2) or '').strip():
+            _reply(chat_id, USAGE, reply_to)
+            return
+        body.update(name=m.group(1), teacherName=m.group(2).strip())
 
     try:
         resp = await http_client.post(
             f'{config.MAIN_SERVER_URL}/internal/telegram/teacher-assign',
-            json={'shortCode': short_code, 'teacherName': teacher_name},
+            json=body,
             headers={'Authorization': f'Bearer {config.MAIN_INTERNAL_TELEGRAM_TOKEN}'},
             timeout=10.0,
         )

@@ -341,3 +341,27 @@ class TelegramMatchResultTests(SimpleTestCase):
         _, sent, rmr, rp = self._run('D')
         self.assertIn('#r_36017851D', sent[-1][1]['text'])
         rmr.assert_not_called(); rp.assert_not_called()
+
+
+class TelegramNameCommandTests(SimpleTestCase):
+    def _post(self, body, found):
+        from api.views import internal_telegram as it
+        with patch.object(it, 'check_internal_auth', return_value=True), \
+             patch.object(it, 'DataRouterClient'), \
+             patch.object(it, 'find_open_matches', return_value=found), \
+             patch.object(it, '_assign_teacher', return_value={'ok': True, 'message': 'done'}) as assign:
+            r = self.client.post('/internal/telegram/teacher-assign', data=json.dumps(body), content_type='application/json')
+        return json.loads(r.content), assign
+
+    def test_teacher_by_name(self):
+        one = [{'sarang_id': 'x', 'short': 'AB12CD34', 'name': '홍길동', 'mt': '10/08 19:00', 'guide': '나유진'}]
+        res, assign = self._post({'name': '홍길동', 'teacherName': '김철수', 'chatId': -1}, one)
+        assign.assert_called_once()
+        self.assertEqual(assign.call_args[0][1:], ('AB12CD34', '김철수'))
+        two = one + [{**one[0], 'short': 'FF00FF00', 'mt': '10/09 18:00'}]
+        res, assign = self._post({'name': '홍길동', 'teacherName': '김철수', 'chatId': -1}, two)
+        assign.assert_not_called()
+        self.assertIn('2명', res['message'])
+        self.assertIn('/t_ff00ff00 김철수', res['message'])
+        res, _ = self._post({'name': '없음', 'teacherName': '김철수', 'chatId': -1}, [])
+        self.assertIn('못 찾았어', res['message'])
