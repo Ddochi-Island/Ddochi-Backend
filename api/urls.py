@@ -261,6 +261,7 @@ internal_urlpatterns = [
     path('sheet-sync', sheet_sync.sheet_sync, name='sheet_sync_sheet_sync'),
     path('telegram/callback', internal_telegram.telegram_callback, name='internal_telegram_telegram_callback'),
     path('telegram/teacher-assign', internal_telegram.telegram_teacher_assign, name='internal_telegram_teacher_assign'),
+    path('telegram/match-result', internal_telegram.telegram_match_result, name='internal_telegram_match_result'),
 ]
 
 internal_cron_urlpatterns = [

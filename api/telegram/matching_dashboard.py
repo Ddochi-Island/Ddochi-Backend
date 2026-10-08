@@ -113,6 +113,7 @@ def _build_text(team_id, rows):
     # 실제 표시 범위는 여기서 자름.
     window_start = today
     window_end = today + datetime.timedelta(days=3)
+    now_key = timezone.localtime().strftime('%Y-%m-%d %H:%M')  # 만남 시각은 KST 벽시계 값
 
     by_sarang = {}
     for r in rows:
@@ -135,6 +136,8 @@ def _build_text(team_id, rows):
                 'name': r['pi_name'] or '', 'guide': r['guide_name'] or '',
                 'teacher': r['teacher_name'] or '', 'outcome': _outcome(r, nxt),
                 'region': r['region'] or '-', 'sarang_id': r['sarang_id'],
+                # 만남 시각이 지났는데 결과 없음 → 결과 입력 명령 노출
+                'past': bool(r['mt_date'] and f"{r['mt_date']} {r['mt_time'] or '00:00'}" <= now_key),
             })
 
     title = '📢 수지역 매칭 현황판' if is_all else f'📢 {team_id}지역 매칭 현황판'
@@ -159,6 +162,8 @@ def _build_text(team_id, rows):
                 if not is_all and not it['outcome']:
                     label = '교사 수정' if it['teacher'] else '교사 입력'
                     lines.append(f"　　└ {label}: /t_{it['sarang_id'][-8:]} 이름")
+                    if it['past']:
+                        lines.append(f"　　└ 결과 입력: /r_{it['sarang_id'][-8:]}")
             lines.append('')
 
     lines.append('➖➖➖➖➖➖➖➖➖➖')

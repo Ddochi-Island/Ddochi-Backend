@@ -1,4 +1,4 @@
-# tel_router 파이썬 최소 버전 — 텔레그램 웹훅 수신(/pair, /t_(교사입력), 인라인 버튼 callback_query 처리) + main→발송 큐(/enqueue)
+# tel_router 파이썬 최소 버전 — 텔레그램 웹훅 수신(/pair, /t_(교사입력), /r_(매칭 결과), 인라인 버튼 callback_query 처리) + main→발송 큐(/enqueue)
 # ponytail: 대시보드 SPA/멀티봇/공유 리드 명령은 뺐음. 필요해지면 추가.
 import asyncio
 import logging
@@ -10,6 +10,7 @@ import callback
 import config
 import pairing
 import teacher_input
+import match_result_cmd
 import telegram_client
 
 logging.basicConfig(level=logging.INFO)
@@ -80,6 +81,21 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str = Heade
             await teacher_input.handle_teacher_message(_http_client, message)
         except Exception:
             logger.exception('teacher command handling failed')
+        return {'ok': True}
+
+    if isinstance(text, str) and match_result_cmd.is_command(text):
+        try:
+            await match_result_cmd.handle_command(_http_client, message)
+        except Exception:
+            logger.exception('match result command handling failed')
+        return {'ok': True}
+
+    date_target = match_result_cmd.date_reply_target(message) if isinstance(text, str) else None
+    if date_target:
+        try:
+            await match_result_cmd.handle_date_reply(_http_client, message, date_target)
+        except Exception:
+            logger.exception('match result date reply handling failed')
         return {'ok': True}
 
     cq = update.get('callback_query')

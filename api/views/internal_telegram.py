@@ -11,6 +11,7 @@ from api.clients.data_router import DataRouterClient
 from api.telegram.habjaeyang import HJ_REJECT_REASONS, refresh_hj_markup, refresh_hj_reason_markup
 from api.telegram.internal_auth import check_internal_auth
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
+from api.telegram import match_result_input
 from api.telegram.shed_union_dashboards import refresh_shed_tm, refresh_shed_unified, shed_groups_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
 from api.views.assets import _member_id_by_name, _set_habjaeyang_approval, _toggle_hj_field
@@ -210,9 +211,39 @@ def telegram_callback(request, *args, **kwargs):
     message_id = body.get('messageId')
     telegram_id = str(body.get('fromId') or '').strip() or None
 
+    client = DataRouterClient()
+    if action == match_result_input.ACTION:  # 매칭 결과 버튼(/r_)
+        return JsonResponse(match_result_input.handle_callback(
+            client, args_str, chat_id, message_id, lambda c, sid: _resolve_actor(c, telegram_id, sid)))
     if action != 'hj':
         return JsonResponse({'toast': None})
 
-    client = DataRouterClient()
     result = _handle_hj(client, args_str, chat_id, message_id, telegram_id)
     return JsonResponse(result)
+
+
+@csrf_exempt
+def telegram_match_result(request, *args, **kwargs):
+    """tel_router가 넘기는 매칭 결과 입력 — mode='start'(/r_ 명령) | 'date'(날짜 안내 메시지에 단 답장).
+    메시지 발송/수정은 여기서 직접(버튼 서명에 chat_id가 필요해서)."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    body = _json_body(request)
+    short = str(body.get('shortCode') or '').strip().upper()
+    chat_id = body.get('chatId')
+    telegram_id = str(body.get('fromId') or '').strip() or None
+    if not short or chat_id is None:
+        return JsonResponse({'ok': False})
+    client = DataRouterClient()
+    if body.get('mode') == 'date':
+        kind = str(body.get('kind') or '')
+        if kind not in match_result_input.POSTPONE:
+            return JsonResponse({'ok': False})
+        match_result_input.handle_date_reply(
+            client, short, kind, body.get('text'), chat_id, body.get('replyTo'), body.get('promptMessageId'),
+            lambda c, sid: _resolve_actor(c, telegram_id, sid))
+    else:
+        match_result_input.start(client, short, chat_id, body.get('replyTo'))
+    return JsonResponse({'ok': True})

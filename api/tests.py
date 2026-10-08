@@ -297,3 +297,47 @@ class RegionShedBoardTests(SimpleTestCase):
         r = {'caller_name': None, 'introducer_name': '유입', 'sender_name': '선문자'}
         self.assertEqual(_sched_person('4', r), '선문자')
         self.assertEqual(_sched_person('246', r), '유입')
+
+
+@override_settings(TG_CALLBACK_HMAC_SECRET='s')
+class TelegramMatchResultTests(SimpleTestCase):
+    ROW = {'sarang_id': 'A' * 24 + '36017851', 'name': '홍길동', 'mt': '10/08 19:00'}
+
+    def _run(self, code):
+        from api.telegram import match_result_input as m
+        sent = []
+        with patch.object(m, '_find_open', return_value=self.ROW), \
+             patch.object(m.tel_router_client, 'enqueue', side_effect=lambda meth, p, **k: sent.append((meth, p))), \
+             patch('api.views.assets.record_match_result', return_value=True) as rmr, \
+             patch('api.views.assets.record_postpone', return_value=True) as rp:
+            toast = m.handle_callback(None, f'36017851.{code}', -100123, 7, lambda c, sid: 'actor')
+        return toast, sent, rmr, rp
+
+    def test_parse_date(self):
+        import datetime
+        from api.telegram.match_result_input import parse_date
+        today = datetime.date(2026, 10, 8)
+        self.assertEqual(parse_date('10/12 19:00', today), '2026-10-12 19:00')
+        self.assertEqual(parse_date('10.12 7시', today), '2026-10-12 07:00')
+        self.assertEqual(parse_date('1/3 19:30', today), '2027-01-03 19:30')
+        self.assertIsNone(parse_date('내일 저녁', today))
+
+    def test_callback_data_fits_telegram_limit(self):
+        from api.telegram.match_result_input import _cb
+        self.assertLessEqual(len(_cb(-1001234567890, '36017851', 'U4').encode()), 64)
+
+    def test_sub_reason_records_result(self):
+        _, sent, rmr, _ = self._run('U2')
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'UNFIT', 'PERSONALITY_UNFIT')
+        self.assertIn('인성비합 입력 완료', sent[-1][1]['text'])
+
+    def test_consult_win_and_undecided_postpone(self):
+        _, _, rmr, _ = self._run('W')
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CONSULT_WIN', None)
+        _, _, _, rp = self._run('S0')
+        rp.assert_called_once_with(None, self.ROW['sarang_id'], '2차만남', '미정', 'actor')
+
+    def test_postpone_prompt_carries_tag(self):
+        _, sent, rmr, rp = self._run('D')
+        self.assertIn('#r_36017851D', sent[-1][1]['text'])
+        rmr.assert_not_called(); rp.assert_not_called()

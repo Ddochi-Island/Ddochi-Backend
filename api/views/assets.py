@@ -537,23 +537,8 @@ def update_match(request, *args, **kwargs):
     if not result_val:
         return JsonResponse({'success': False, 'message': f'알 수 없는 결과: {match_result}'}, status=400)
 
-    cur = client.query_one(
-        """SELECT MATCH_ID FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
-            ORDER BY MATCH_DEGREE DESC, ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
-        [sarang_id],
-    )
-    if not cur:
+    if not record_match_result(client, sarang_id, result_val, sub_reason):
         return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
-    client.exec(
-        "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
-        [result_val, sub_reason, cur['match_id']],
-    )
-    try:
-        refresh_matching_dashboard_for_sarang(client, sarang_id)
-    except Exception:
-        logging.getLogger('api.views.assets').warning(
-            '[update_match:status] matching dashboard refresh failed', exc_info=True,
-        )
     return JsonResponse({'success': True, 'message': '결과가 입력됐어!'})
 
 
@@ -1020,29 +1005,33 @@ def update_approval(request, *args, **kwargs):
     return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
 
 
-@csrf_exempt
-@require_jwt
-def postpone_meeting(request, *args, **kwargs):
-    """결과입력의 밀림/2차만남 처리 — 현재 열린(RESULT IS NULL) 매칭 시도를 마무리하고
-    새 시도 행을 추가. SARANG_MATCH_HISTORIES는 append-only라 밀림은 같은 차수 안에서
-    ATTEMPT_COUNT+1, 2차만남은 새 차수(MATCH_DEGREE+1)로 넘어감(테이블 자체 설계).
-    날짜를 아직 안 정했으면('미정' 체크) MATCHED_AT을 NULL로 둬서 프론트가 '미정'
-    그룹으로 묶게 함."""
-    if request.method not in ['POST']:
-        return JsonResponse({"error": "method_not_allowed"}, status=405)
+def record_match_result(client, sarang_id, result_val, sub_reason):
+    """열린(RESULT IS NULL) 매칭 시도에 최종 결과(취소/비합/탈락/상담따기)를 기록 — 웹 결과입력과 텔레그램(/r_)이 공유.
+    열린 시도가 없으면 False."""
+    cur = client.query_one(
+        """SELECT MATCH_ID FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
+            ORDER BY MATCH_DEGREE DESC, ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
+        [sarang_id],
+    )
+    if not cur:
+        return False
+    client.exec(
+        "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
+        [result_val, sub_reason, cur['match_id']],
+    )
+    try:
+        refresh_matching_dashboard_for_sarang(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning(
+            '[record_match_result] matching dashboard refresh failed', exc_info=True,
+        )
+    return True
 
-    body = _json_body(request)
-    sarang_id = str(body.get('rowIndex') or '').strip()
-    log_type = str(body.get('logType') or '')
-    new_date = str(body.get('newDate') or '').strip()
-    reason = str(body.get('logContent') or '').strip()
-    if not sarang_id or log_type not in ('밀림처리', '2차만남'):
-        return JsonResponse({'success': False, 'message': 'rowIndex/logType 필요'}, status=400)
 
+def record_postpone(client, sarang_id, log_type, new_date, sabun, reason=''):
+    """밀림처리/2차만남 — 열린 시도를 마무리하고 다음 시도 행 추가(new_date 'YYYY-MM-DD HH:MM' 또는 미정/빈값).
+    웹(postpone_meeting)과 텔레그램(/r_)이 공유. 열린 시도가 없으면 False."""
     result_code = 'DELAY' if log_type == '밀림처리' else 'SECOND_MEET'
-    sabun = request.user['sabun']
-    client = DataRouterClient()
-
     cur = client.query_one(
         """SELECT MATCH_ID, MATCH_DEGREE, ATTEMPT_COUNT, TEACHER_MEMBER_ID, MATCH_LOCATION
              FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
@@ -1050,7 +1039,7 @@ def postpone_meeting(request, *args, **kwargs):
         [sarang_id],
     )
     if not cur:
-        return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
+        return False
 
     if log_type == '밀림처리':
         next_degree, next_attempt = int(cur['match_degree']), int(cur['attempt_count']) + 1
@@ -1084,6 +1073,33 @@ def postpone_meeting(request, *args, **kwargs):
         refresh_matching_dashboard_for_sarang(client, sarang_id)
     except Exception:
         logging.getLogger('api.views.assets').warning('[postpone_meeting] matching dashboard refresh failed', exc_info=True)
+    return True
+
+
+@csrf_exempt
+@require_jwt
+def postpone_meeting(request, *args, **kwargs):
+    """결과입력의 밀림/2차만남 처리 — 현재 열린(RESULT IS NULL) 매칭 시도를 마무리하고
+    새 시도 행을 추가. SARANG_MATCH_HISTORIES는 append-only라 밀림은 같은 차수 안에서
+    ATTEMPT_COUNT+1, 2차만남은 새 차수(MATCH_DEGREE+1)로 넘어감(테이블 자체 설계).
+    날짜를 아직 안 정했으면('미정' 체크) MATCHED_AT을 NULL로 둬서 프론트가 '미정'
+    그룹으로 묶게 함."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+
+    body = _json_body(request)
+    sarang_id = str(body.get('rowIndex') or '').strip()
+    log_type = str(body.get('logType') or '')
+    new_date = str(body.get('newDate') or '').strip()
+    reason = str(body.get('logContent') or '').strip()
+    if not sarang_id or log_type not in ('밀림처리', '2차만남'):
+        return JsonResponse({'success': False, 'message': 'rowIndex/logType 필요'}, status=400)
+
+    sabun = request.user['sabun']
+    client = DataRouterClient()
+
+    if not record_postpone(client, sarang_id, log_type, new_date, sabun, reason):
+        return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
 
     return JsonResponse({'success': True, 'message': f'{log_type} 처리 완료!'})
 
