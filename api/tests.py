@@ -365,3 +365,16 @@ class TelegramNameCommandTests(SimpleTestCase):
         self.assertIn('/t_ff00ff00 김철수', res['message'])
         res, _ = self._post({'name': '없음', 'teacherName': '김철수', 'chatId': -1}, [])
         self.assertIn('못 찾았어', res['message'])
+
+
+class JournalEditPermissionTests(SimpleTestCase):
+    def test_author_or_district_lead(self):
+        from api.views.short_card import _can_edit_journal
+        client = MagicMock()
+        self.assertTrue(_can_edit_journal(client, 'A', 'A'))
+        client.query_one.assert_not_called()
+        client.query_one.return_value = {'ok': '1'}
+        self.assertTrue(_can_edit_journal(client, 'LEAD', 'A'))
+        self.assertEqual(client.query_one.call_args[0][1], ['A', 'LEAD'])
+        client.query_one.return_value = None
+        self.assertFalse(_can_edit_journal(client, 'OTHER', 'A'))

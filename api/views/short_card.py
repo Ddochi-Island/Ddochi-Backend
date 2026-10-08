@@ -435,14 +435,30 @@ def get_short_card_journal(request, *args, **kwargs):
 
     row['stage'] = _journal_stage(row)
     row['sprout_status_label'] = _SPROUT_STATUS_KO.get(row['sprout_status'])
-    row['is_editable'] = is_author
+    row['is_editable'] = is_author or _can_edit_journal(client, sabun, row['member_id'])
     return JsonResponse({'success': True, 'card': row})
+
+
+def _can_edit_journal(client, sabun, author_id):
+    """농부일지 작성·수정 — 인도자 본인 + 그 인도자의 담당 구역장(같은 지역·같은 구역에 area_lead 직책, 겸직도 인정).
+    2026-10-09 사용자 요청(전엔 본인만)."""
+    if author_id == sabun:
+        return True
+    return bool(client.query_one(
+        """SELECT 1 AS OK
+             FROM MEMBER_AFFILIATION_HISTORIES me
+             JOIN MEMBER_AFFILIATION_HISTORIES au ON au.MEMBER_ID = :1 AND au.IS_CURRENT = 1
+                  AND au.REGION_CODE = me.REGION_CODE AND au.DISTRICT_CODE = me.DISTRICT_CODE
+             JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = me.MEMBER_ID AND mpm.POSITION_CODE = 'area_lead'
+            WHERE me.MEMBER_ID = :2 AND me.IS_CURRENT = 1""",
+        [author_id, sabun],
+    ))
 
 
 @csrf_exempt
 @require_jwt
 def save_short_card_journal(request, *args, **kwargs):
-    """농부일지 저장 — 인도자 본인만. 넘어온 필드만 부분 UPDATE."""
+    """농부일지 저장 — 인도자 본인과 담당 구역장. 넘어온 필드만 부분 UPDATE."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -460,8 +476,8 @@ def save_short_card_journal(request, *args, **kwargs):
     )
     if not card:
         return JsonResponse({'success': False, 'message': '짧카를 찾을 수 없어요'}, status=404)
-    if card['member_id'] != sabun:
-        return JsonResponse({'success': False, 'message': '인도자 본인만 농부일지를 쓸 수 있어요'}, status=403)
+    if not _can_edit_journal(client, sabun, card['member_id']):
+        return JsonResponse({'success': False, 'message': '인도자 본인과 담당 구역장만 농부일지를 쓸 수 있어요'}, status=403)
 
     field_map = {
         'faithStatus': 'FAITH_STATUS', 'relation': 'RELATION', 'personality': 'PERSONALITY',
