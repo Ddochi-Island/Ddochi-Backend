@@ -191,6 +191,7 @@ def group_sprout_status(client, region_codes=None):
         districts = [d for d in (g['district_codes'] or '').split(',') if d]
         out.append({
             'groupId': g['group_id'], 'region': g['region_code'], 'name': g['group_name'],
+            'districts': districts,  # 밭 관리하기 상단 반 칩 → 그 반의 밭만 보기 필터용
             'leaderName': g['leader_name'], 'goal': GROUP_SPROUT_GOAL,
             'sprouts': sum(sprouts.get((g['region_code'], d), 0) for d in districts),
         })
