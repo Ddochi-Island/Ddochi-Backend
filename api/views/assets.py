@@ -3,6 +3,7 @@ import datetime
 import hashlib
 import json
 import logging
+import random
 import re
 import time
 import uuid
@@ -1588,12 +1589,17 @@ def get_shed_prospects(request, *args, **kwargs):
     return JsonResponse({'success': True, 'list': list_})
 
 
+# 인도권 룰렛을 쓰는 지역과 티엠자 당첨 확률(레거시 Math.random() < 0.6) — 나머지 지역은 유입자
+GACHA_REGIONS = ('1', '5')
+GACHA_TM_WIN_RATE = 0.6
+
+
 @csrf_exempt
 @require_jwt
 def run_shed_gacha(request, *args, **kwargs):
-    """선한 양치기 인도권 가챠 — 합재양 저장 직후 자동 호출됨. 최소 버전: 확률 없이
-    항상 티엠자가 인도자로 확정(원래는 회차별 60/70/100% 확률로 유입자 vs 티엠자 결정
-    — GACHA_COUNTS 테이블 포함해서 나중에 추가)."""
+    """만남픽스 후 인도권 정하기 — 합재양 저장 직후 자동 호출. 1·5지역만 레거시와 같은 룰렛(티엠자 60% / 유입자 40%),
+    나머지 지역은 룰렛 없이 무조건 유입자(2026-10-09 사용자 결정). 지역은 유입자 소속(다른 판들과 같은 기준).
+    전엔 확률 없이 항상 티엠자로 확정하는 최소 버전이었음."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -1605,9 +1611,27 @@ def run_shed_gacha(request, *args, **kwargs):
         return JsonResponse({'success': False, 'message': '필수 값 누락'}, status=400)
 
     client = DataRouterClient()
-    winner_id = _member_id_by_name(client, tm_name)
-    if not winner_id:
-        return JsonResponse({'success': False, 'message': f'티엠자 이름[{tm_name}]이 명단에 없어!'}, status=400)
+    intro = client.query_one(
+        """SELECT sid.INTRODUCER_MEMBER_ID, mah.REGION_CODE
+             FROM SARANG s JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = COALESCE(sid.INTRODUCER_MEMBER_ID, s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
+            WHERE s.SARANG_ID = :1""",
+        [sarang_id],
+    ) or {}
+    inflow_id = intro.get('introducer_member_id') or _member_id_by_name(client, inflow_name)
+    if not inflow_id:
+        return JsonResponse({'success': False, 'message': f'유입자 이름[{inflow_name}]이 명단에 없어!'}, status=400)
+
+    roulette = intro.get('region_code') in GACHA_REGIONS
+    if roulette:
+        tm_id = _member_id_by_name(client, tm_name)
+        if not tm_id:
+            return JsonResponse({'success': False, 'message': f'티엠자 이름[{tm_name}]이 명단에 없어!'}, status=400)
+        tm_wins = random.random() < GACHA_TM_WIN_RATE
+    else:
+        tm_wins = False
+    winner_id = tm_id if tm_wins else inflow_id
 
     affected = client.exec(
         "UPDATE SARANG_HAB_JAE_YANG SET GUIDE_MEMBER_ID = :1 WHERE SARANG_ID = :2 AND IS_ACTIVE = 1",
@@ -1622,9 +1646,10 @@ def run_shed_gacha(request, *args, **kwargs):
         logging.getLogger('api.views.assets').warning('[run_shed_gacha] telegram refresh failed', exc_info=True)
 
     return JsonResponse({
-        'success': True, 'winner': 'tm', 'winnerName': tm_name,
+        'success': True, 'roulette': roulette,
+        'winner': 'tm' if tm_wins else 'inflow', 'winnerName': tm_name if tm_wins else inflow_name,
         'inflowName': inflow_name, 'tmName': tm_name,
-        'currentRound': 1, 'nextProb': 100,
+        'currentRound': 1, 'nextProb': int(GACHA_TM_WIN_RATE * 100),
     })
 
 

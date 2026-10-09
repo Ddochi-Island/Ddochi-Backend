@@ -378,3 +378,30 @@ class JournalEditPermissionTests(SimpleTestCase):
         self.assertEqual(client.query_one.call_args[0][1], ['A', 'LEAD'])
         client.query_one.return_value = None
         self.assertFalse(_can_edit_journal(client, 'OTHER', 'A'))
+
+
+class ShedGachaRegionTests(SimpleTestCase):
+    def _run(self, region, rnd):
+        from api.views import assets
+        f = assets.run_shed_gacha
+        while hasattr(f, '__wrapped__'):
+            f = f.__wrapped__
+        client = MagicMock()
+        client.query_one.return_value = {'introducer_member_id': 'INFLOW', 'region_code': region}
+        client.exec.return_value = 1
+        req = MagicMock(method='POST', body=json.dumps({'docId': 'S', 'inflowName': '유입', 'tmName': '티엠'}).encode())
+        with patch.object(assets, 'DataRouterClient', return_value=client), \
+             patch.object(assets, '_member_id_by_name', return_value='TM'), \
+             patch.object(assets, 'send_habjaeyang_to_telegram'), \
+             patch.object(assets.random, 'random', return_value=rnd) as roll:
+            res = json.loads(f(req).content)
+        return res, client.exec.call_args[0][1][0], roll
+
+    def test_roulette_only_in_regions_1_and_5(self):
+        res, guide, roll = self._run('1', 0.3)
+        self.assertEqual((res['roulette'], res['winner'], guide), (True, 'tm', 'TM'))
+        res, guide, _ = self._run('5', 0.9)
+        self.assertEqual((res['winner'], guide), ('inflow', 'INFLOW'))
+        res, guide, roll = self._run('3', 0.0)
+        self.assertEqual((res['roulette'], res['winner'], guide), (False, 'inflow', 'INFLOW'))
+        roll.assert_not_called()
