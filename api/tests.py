@@ -387,7 +387,7 @@ class ShedGachaRegionTests(SimpleTestCase):
         while hasattr(f, '__wrapped__'):
             f = f.__wrapped__
         client = MagicMock()
-        client.query_one.return_value = {'introducer_member_id': 'INFLOW', 'region_code': region}
+        client.query_one.return_value = {'introducer_member_id': 'INFLOW', 'region_code': region, **getattr(self, 'extra', {})}
         client.exec.return_value = 1
         req = MagicMock(method='POST', body=json.dumps({'docId': 'S', 'inflowName': '유입', 'tmName': '티엠'}).encode())
         with patch.object(assets, 'DataRouterClient', return_value=client), \
@@ -405,3 +405,26 @@ class ShedGachaRegionTests(SimpleTestCase):
         res, guide, roll = self._run('3', 0.0)
         self.assertEqual((res['roulette'], res['winner'], guide), (False, 'inflow', 'INFLOW'))
         roll.assert_not_called()
+
+
+class ShedGachaPublicTests(ShedGachaRegionTests):
+    def test_roulette_only_in_regions_1_and_5(self):
+        pass  # 부모 케이스는 공개 아님 — 여기선 공개 건만
+
+    def test_public_item_always_goes_to_tm(self):
+        import datetime
+        from django.utils import timezone
+        today = timezone.localdate()
+        old = (today - datetime.timedelta(days=5)).isoformat()
+        self.extra = {'received_day': '2026-10-08', 'inflow_day': old, 'calls': '0'}
+        res, guide, roll = self._run('3', 0.99)  # 룰렛 없는 지역이어도
+        self.assertEqual((res['public'], res['winner'], guide), (True, 'tm', 'TM'))
+        res, guide, roll = self._run('1', 0.99)  # 룰렛 지역이어도 룰렛 안 돌림
+        self.assertEqual((res['roulette'], res['winner']), (False, 'tm'))
+        roll.assert_not_called()
+        self.extra = {'received_day': '2026-10-08', 'inflow_day': today.isoformat(), 'calls': '4'}
+        res, _, _ = self._run('3', 0.0)
+        self.assertEqual(res['winner'], 'tm')
+        self.extra = {'received_day': '2026-10-01', 'inflow_day': old, 'calls': '9'}  # 합당한자 이전 건은 해당 없음
+        res, guide, _ = self._run('3', 0.0)
+        self.assertEqual((res['public'], guide), (False, 'INFLOW'))

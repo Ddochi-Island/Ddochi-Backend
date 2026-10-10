@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
@@ -1589,6 +1590,20 @@ def get_shed_prospects(request, *args, **kwargs):
     return JsonResponse({'success': True, 'list': list_})
 
 
+# 합당한자 전체 공개 기준 — 프론트(SunhanYanghagiScreen openToAll)와 같은 숫자. 합당한자 시작(10/8) 이후 받은 건만 해당
+HAPDANG_START_DAY = '2026-10-08'
+PUBLIC_AFTER_DAYS = 4
+PUBLIC_AFTER_CALLS = 4
+
+
+def _was_public_in_hapdang(row):
+    """만남픽스 시점에 🌏 전체 공개였는지 — 신청일(없으면 받은 날)부터 4일 지남 또는 티엠 4회 이상(만남픽스 기록 제외)."""
+    if not row.get('received_day') or row['received_day'] < HAPDANG_START_DAY:
+        return False
+    days = (timezone.localdate() - datetime.date.fromisoformat(row['inflow_day'])).days if row.get('inflow_day') else 0
+    return days >= PUBLIC_AFTER_DAYS or int(row.get('calls') or 0) >= PUBLIC_AFTER_CALLS
+
+
 # 인도권 룰렛을 쓰는 지역과 티엠자 당첨 확률(레거시 Math.random() < 0.6) — 나머지 지역은 유입자
 GACHA_REGIONS = ('1', '5')
 GACHA_TM_WIN_RATE = 0.6
@@ -1612,7 +1627,10 @@ def run_shed_gacha(request, *args, **kwargs):
 
     client = DataRouterClient()
     intro = client.query_one(
-        """SELECT sid.INTRODUCER_MEMBER_ID, mah.REGION_CODE
+        """SELECT sid.INTRODUCER_MEMBER_ID, mah.REGION_CODE,
+                  TO_CHAR(s.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS RECEIVED_DAY,
+                  TO_CHAR(COALESCE(sid.APPLIED_AT, s.CREATED_AT) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS INFLOW_DAY,
+                  (SELECT COUNT(*) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT <> 'MEET_FIX') AS CALLS
              FROM SARANG s JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
              LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = COALESCE(sid.INTRODUCER_MEMBER_ID, s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
@@ -1623,14 +1641,15 @@ def run_shed_gacha(request, *args, **kwargs):
     if not inflow_id:
         return JsonResponse({'success': False, 'message': f'유입자 이름[{inflow_name}]이 명단에 없어!'}, status=400)
 
-    roulette = intro.get('region_code') in GACHA_REGIONS
-    if roulette:
+    public = _was_public_in_hapdang(intro)
+    roulette = not public and intro.get('region_code') in GACHA_REGIONS
+    tm_id = None
+    if public or roulette:
         tm_id = _member_id_by_name(client, tm_name)
         if not tm_id:
             return JsonResponse({'success': False, 'message': f'티엠자 이름[{tm_name}]이 명단에 없어!'}, status=400)
-        tm_wins = random.random() < GACHA_TM_WIN_RATE
-    else:
-        tm_wins = False
+    # 합당한자 🌏 전체 공개 건은 무조건 티엠자(다른 지역이 같이 돌린 건이라 — 2026-10-10 사용자 결정), 그 외 1·5지역은 룰렛
+    tm_wins = public or (roulette and random.random() < GACHA_TM_WIN_RATE)
     winner_id = tm_id if tm_wins else inflow_id
 
     affected = client.exec(
@@ -1646,7 +1665,7 @@ def run_shed_gacha(request, *args, **kwargs):
         logging.getLogger('api.views.assets').warning('[run_shed_gacha] telegram refresh failed', exc_info=True)
 
     return JsonResponse({
-        'success': True, 'roulette': roulette,
+        'success': True, 'roulette': roulette, 'public': public,
         'winner': 'tm' if tm_wins else 'inflow', 'winnerName': tm_name if tm_wins else inflow_name,
         'inflowName': inflow_name, 'tmName': tm_name,
         'currentRound': 1, 'nextProb': int(GACHA_TM_WIN_RATE * 100),
