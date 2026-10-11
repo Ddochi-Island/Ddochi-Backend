@@ -26,6 +26,7 @@ from .views import shed_report
 from .views import shed_users
 from .views import referral
 from .views import suggestions
+from .views import erp
 from .views import sheet_sync
 from .views import sheets
 from .views import short_card
@@ -249,6 +250,11 @@ api_urlpatterns = [
     path('referral/resolve', referral.resolve, name='referral_resolve'),
     path('suggestions/submit', suggestions.suggestions_submit, name='suggestions_submit'),
     path('suggestions/list', suggestions.suggestions_list, name='suggestions_list'),
+    path('erp/search', erp.erp_search, name='erp_search'),
+    path('erp/sarang-detail', erp.erp_sarang_detail, name='erp_sarang_detail'),
+    path('erp/tm-stats', erp.erp_tm_stats, name='erp_tm_stats'),
+    path('erp/weekly', erp.erp_weekly, name='erp_weekly'),
+    path('erp/funnel', erp.erp_funnel, name='erp_funnel'),
     path('shed/report', shed_report.shed_report, name='shed_report_shed_report'),
     path('shared-leads/notify', shared_leads_notify.shared_leads_notify, name='shared_leads_notify_shared_leads_notify'),
 ]
