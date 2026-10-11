@@ -8,6 +8,7 @@ from api.views.short_card import GROUP_SPROUT_GOAL, _JOURNAL_FIELDS, _journal_st
 
 TEAM_ID = '수지역'  # 수지역 매칭현황판과 같은 방("[대학] 전도시스템", matchingChatId)
 _WEEK = ['월', '화', '수', '목', '금', '토', '일']
+EXTRA_CHAT_IDS = ('-1004402786308',)  # 같은 전광판을 함께 받는 방(10/12 추가)
 _MARKUP = {'inline_keyboard': [[{'text': '🏞️ 밭 관리하기에서 보기', 'url': 'https://page.ddochi.cloud/#/shortCardList'}]]}
 
 
@@ -128,10 +129,16 @@ def build_blocks(client, sample=False):
 
 def send_sprout_board(client, sample=False):
     cfg = load_team_config(client, TEAM_ID)
+    blocks = build_blocks(client, sample)
+    results = {}
     chat_id = cfg.get('matchingChatId')
-    if not chat_id:
-        return {'skipped': True, 'reason': 'no_chat_id'}
-    return send_fresh_dashboard(
+    results['main'] = send_fresh_dashboard(
         client, TEAM_ID, chat_id, None, _MARKUP, cfg,
-        'lastSproutBoardMsgId', 'lastSproutBoardMsgDate', 'sprout_board', rich_blocks=build_blocks(client, sample),
-    )
+        'lastSproutBoardMsgId', 'lastSproutBoardMsgDate', 'sprout_board', rich_blocks=blocks,
+    ) if chat_id else {'skipped': True, 'reason': 'no_chat_id'}
+    for extra in EXTRA_CHAT_IDS:  # 방마다 직전 메시지 id를 따로 둬야 같은 날 재발송 때 그 방 것만 지움
+        results[extra] = send_fresh_dashboard(
+            client, TEAM_ID, extra, None, _MARKUP, cfg,
+            f'lastSproutBoardMsgId_{extra}', f'lastSproutBoardMsgDate_{extra}', 'sprout_board', rich_blocks=blocks,
+        )
+    return results
