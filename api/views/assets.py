@@ -1007,6 +1007,22 @@ def update_approval(request, *args, **kwargs):
     return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
 
 
+# 매칭 결과 → SARANG.STAGE 진행. 실제로 만난 결과(비합/탈락/2차만남)는 '매칭', 상담따기는 '상따'.
+# 취소/밀림은 안 만난 거라 그대로. 이미 더 뒤 단계면 안 내림(재가 이전 단계에서만 올림)
+_MATCH_STAGE = {'UNFIT': '매칭', 'DROPOUT': '매칭', 'SECOND_MEET': '매칭', 'CONSULT_WIN': '상따'}
+_STAGES_BEFORE = {'매칭': ('유입', '티엠', '만픽', '합재양', '재가'), '상따': ('유입', '티엠', '만픽', '합재양', '재가', '매칭')}
+
+
+def _match_stage_stmt(sarang_id, result_code):
+    stage = _MATCH_STAGE.get(result_code)
+    if not stage:
+        return None
+    before = _STAGES_BEFORE[stage]
+    marks = ', '.join(f':{i + 3}' for i in range(len(before)))
+    return {'sql': f"UPDATE SARANG SET STAGE = :1 WHERE SARANG_ID = :2 AND STAGE IN ({marks})",
+            'args': [stage, sarang_id, *before]}
+
+
 def record_match_result(client, sarang_id, result_val, sub_reason):
     """열린(RESULT IS NULL) 매칭 시도에 최종 결과(취소/비합/탈락/상담따기)를 기록 — 웹 결과입력과 텔레그램(/r_)이 공유.
     열린 시도가 없으면 False."""
@@ -1017,10 +1033,12 @@ def record_match_result(client, sarang_id, result_val, sub_reason):
     )
     if not cur:
         return False
-    client.exec(
-        "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
-        [result_val, sub_reason, cur['match_id']],
-    )
+    stmts = [{'sql': "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
+              'args': [result_val, sub_reason, cur['match_id']]}]
+    stage_stmt = _match_stage_stmt(sarang_id, result_val)
+    if stage_stmt:
+        stmts.append(stage_stmt)
+    client.tx(stmts)
     try:
         refresh_matching_dashboard_for_sarang(client, sarang_id)
     except Exception:
@@ -1069,6 +1087,9 @@ def record_postpone(client, sarang_id, log_type, new_date, sabun, reason=''):
                       VALUES (:1, :2, :3, :4, NULL, :5, :6, 'SCHEDULED')""",
             'args': [uuid.uuid4().hex.upper(), sarang_id, next_degree, next_attempt, cur['match_location'], cur['teacher_member_id']],
         })
+    stage_stmt = _match_stage_stmt(sarang_id, result_code)
+    if stage_stmt:
+        stmts.append(stage_stmt)
     client.tx(stmts)
 
     try:
