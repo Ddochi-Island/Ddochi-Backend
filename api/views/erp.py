@@ -139,8 +139,9 @@ def erp_sarang_detail(client, body):
     if not info:
         raise ValueError('없는 사랑이야')
     calls = client.query(
-        """SELECT tl.CREATED_AT AS AT, trc.LABEL, tl.SUB_REASON AS DETAIL, m.NAME AS ACTOR
+        """SELECT tl.CREATED_AT AS AT, trc.LABEL, COALESCE(tsr.LABEL, tl.SUB_REASON) AS DETAIL, m.NAME AS ACTOR
              FROM TM_LOGS tl JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = tl.RESULT
+             LEFT JOIN TM_SUB_REASON_CODES tsr ON tsr.RESULT_CODE = tl.RESULT AND tsr.SUB_CODE = tl.SUB_REASON
              JOIN MEMBERS m ON m.MEMBER_ID = tl.CALLER_MEMBER_ID
             WHERE tl.SARANG_ID = :1""", [sid])
     acts = client.query(
