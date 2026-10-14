@@ -147,12 +147,16 @@ def erp_sarang_detail(client, body):
         """SELECT al.CREATED_AT AS AT, al.EVENT_TYPE AS LABEL, m.NAME AS ACTOR
              FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS m ON m.MEMBER_ID = al.ACTOR_MEMBER_ID
             WHERE al.SARANG_ID = :1""", [sid])
+    # 매칭 이력엔 교사가 안 채워짐(교사는 합재양에만 저장) → 활성 합재양 교사로 보충. 세부사유는 코드 → 라벨
     matches = client.query(
         """SELECT COALESCE(mh.MATCHED_AT, mh.CREATED_AT) AS AT, mh.MATCH_DEGREE, mh.ATTEMPT_COUNT,
-                  COALESCE(mrc.LABEL, '진행 예정') AS RESULT_LABEL, mh.SUB_REASON, mh.MATCH_LOCATION, m.NAME AS TEACHER
+                  COALESCE(mrc.LABEL, '진행 예정') AS RESULT_LABEL, COALESCE(msr.LABEL, mh.SUB_REASON) AS SUB_REASON, mh.MATCH_LOCATION,
+                  COALESCE(m.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER
              FROM SARANG_MATCH_HISTORIES mh
              LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = mh.RESULT
-             LEFT JOIN MEMBERS m ON m.MEMBER_ID = mh.TEACHER_MEMBER_ID
+             LEFT JOIN MATCH_SUB_REASON_CODES msr ON msr.RESULT_CODE = mh.RESULT AND msr.SUB_CODE = mh.SUB_REASON
+             LEFT JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = mh.SARANG_ID AND h.IS_ACTIVE = 1
+             LEFT JOIN MEMBERS m ON m.MEMBER_ID = COALESCE(mh.TEACHER_MEMBER_ID, h.TEACHER_MEMBER_ID)
             WHERE mh.SARANG_ID = :1""", [sid])
     timeline = (
         [{'at': info['inflow_date'], 'kind': 'inflow', 'label': '유입', 'actor': info['introducer_name']}]
