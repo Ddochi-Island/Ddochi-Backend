@@ -116,6 +116,15 @@ def erp_search(client, body):
     return {'list': rows}
 
 
+def _match_label(r):
+    """"N차 만남 · 결과" — 2차만남(SECOND_MEET) 결과는 다음 만남을 잡았다는 뜻이라 "N+1차 만남 잡음"으로."""
+    deg = int(r['match_degree'] or 1)
+    attempt = int(r['attempt_count'] or 1)
+    head = f"{deg}차 만남" + (f" ({attempt}번째 일정)" if attempt > 1 else '')
+    result = f"{deg + 1}차 만남 잡음" if r['result_label'] == '2차만남' else r['result_label']
+    return f"{head} · {result}"
+
+
 @_admin_view
 def erp_sarang_detail(client, body):
     sid = str(body.get('sarangId') or '')
@@ -163,7 +172,7 @@ def erp_sarang_detail(client, body):
         [{'at': info['inflow_date'], 'kind': 'inflow', 'label': '유입', 'actor': info['introducer_name']}]
         + [{'at': r['at'], 'kind': 'call', 'label': r['label'], 'detail': r['detail'], 'actor': r['actor']} for r in calls]
         + [{'at': r['at'], 'kind': 'activity', 'label': r['label'], 'actor': r['actor']} for r in acts]
-        + [{'at': r['at'], 'kind': 'match', 'label': f"{r['match_degree']}차 매칭 · {r['result_label']}",
+        + [{'at': r['at'], 'kind': 'match', 'label': _match_label(r),
             'detail': ' / '.join(x for x in (r['sub_reason'], r['match_location']) if x), 'actor': r['teacher']}
            for r in matches]
     )
