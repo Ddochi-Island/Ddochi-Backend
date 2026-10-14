@@ -531,7 +531,7 @@ def update_match(request, *args, **kwargs):
         if detail.startswith(icon):
             detail = detail[len(icon):]
             break
-    if detail == '상담따기':
+    if detail in ('상담연결', '상담따기'):  # 상담따기는 옛 이름(10/14 상담연결로 변경) — 열려 있던 화면 호환
         result_val, sub_reason = 'CONSULT_WIN', None
     else:
         pair = _RESULT_SUB_REASON_MAP.get(detail)
@@ -1517,7 +1517,7 @@ def get_shed_prospects(request, *args, **kwargs):
     # "이관받기"를 클릭한 Ddochi 담당자라 다른 개념 — 실제 유입자(shed에서 찾은 사람)는
     # INTRODUCER_NAME이므로 그걸 우선 쓰고, 없을 때만(레거시 데이터 등) 담당자로 대체.
     timeline_by_id = {
-        r['sarang_id']: [{'id': f"{r['sarang_id']}-inflow", 'label': '유입', 'category': None, 'source': 'inflow',
+        r['sarang_id']: [{'id': f"{r['sarang_id']}-inflow", 'label': '찾기', 'category': None, 'source': 'inflow',
                            'actorName': r['introducer_name'] or r['inflow_member_name'], 'createdAt': r['inflow_date']}]
         for r in rows
     }

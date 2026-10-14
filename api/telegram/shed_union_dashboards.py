@@ -205,7 +205,7 @@ def _build_message_unified(client, group):
     rows = _fetch_unified_rows(client, regions)
     region_configs = load_all_team_configs(client, regions)
     region_chat_map = {r: (cfg.get('prospectChatId') or cfg.get('matchingChatId')) for r, cfg in region_configs.items()}
-    title = f"{_group_label(group)} 통합 찾기 현황판"
+    title = f"{_group_label(group)} 통합 합당한 자 현황판"
     return _build_unified_text(group, title, rows, region_chat_map)
 
 

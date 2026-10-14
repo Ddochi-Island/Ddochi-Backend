@@ -285,7 +285,7 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_s
     lines.append('')
     lines.append('[오프라인]')
     off_rows = ['구역|활동|말겂|번찾|재가|합재']
-    on_rows = ['구역|홍보|디엠|유입|재가|합재']
+    on_rows = ['구역|홍보|디엠|찾기|재가|합재']
     for dc in sorted(by_district.keys()):
         s = by_district[dc]
         off_rows.append(_table_row(dc, [s['off_act'], s['talk'], s['shed_reg'], s['appr_off'], s['hjy_off']]))

@@ -24,7 +24,7 @@ CHANNEL_DEFS = {
     'stats':           {'field': 'statsChatId', 'label': '일일보고', 'lastMsgIdField': 'lastStatsMsgId'},
     'prayer':          {'field': 'prayerChatId', 'label': '기도문'},
     'matching':        {'field': 'matchingChatId', 'label': '매칭현황판', 'lastMsgIdField': 'lastMatchingMsgId'},
-    'prospect':        {'field': 'prospectChatId', 'label': '찾기현황판', 'lastMsgIdField': 'lastProspectMsgId'},
+    'prospect':        {'field': 'prospectChatId', 'label': '합당한 자 현황판', 'lastMsgIdField': 'lastProspectMsgId'},
     'feedback':        {'field': 'feedbackChatId', 'label': '매칭피드백', 'lastMsgIdField': 'lastFeedbackMsgId'},
     'returnHome':      {'field': 'returnHomeChatId', 'label': '귀소할일'},
     'community':       {'field': 'communityChatId', 'label': '커뮤니티'},

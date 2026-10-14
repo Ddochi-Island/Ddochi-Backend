@@ -16,7 +16,7 @@ logger = logging.getLogger('api.telegram.match_result_input')
 ACTION = 'mr'
 # 버튼 코드 → (라벨, 결과 코드). 콜백 데이터 64바이트 한도라 한 글자.
 RESULTS = [('C', '취소', 'CANCEL'), ('D', '밀림', 'DELAY'), ('U', '비합', 'UNFIT'),
-           ('X', '탈락', 'DROPOUT'), ('S', '2차만남', 'SECOND_MEET'), ('W', '상담따기', 'CONSULT_WIN')]
+           ('X', '탈락', 'DROPOUT'), ('S', '2차만남', 'SECOND_MEET'), ('W', '상담연결', 'CONSULT_WIN')]
 _RESULT_BY_CODE = {c: (label, rc) for c, label, rc in RESULTS}
 # 사유가 필요한 결과 — 웹 결과입력(_RESULT_SUB_REASON_MAP)과 같은 사유
 SUB_REASONS = {
@@ -99,8 +99,8 @@ def handle_callback(client, args, chat_id, message_id, actor_resolver):
 
     if code == 'W':
         record_match_result(client, row['sarang_id'], 'CONSULT_WIN', None)
-        _edit(chat_id, message_id, f'✅ {head}\n→ 상담따기 입력 완료')
-        return {'toast': '상담따기 입력 완료'}
+        _edit(chat_id, message_id, f'✅ {head}\n→ 상담연결 입력 완료')
+        return {'toast': '상담연결 입력 완료'}
 
     if code in SUB_REASONS:  # 사유 고르기
         back = {'text': '← 뒤로', 'callback_data': _cb(chat_id, short, 'b')}

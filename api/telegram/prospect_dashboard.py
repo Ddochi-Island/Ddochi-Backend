@@ -98,7 +98,7 @@ def _build_text(team_id, rows, chat_id):
     tg_chat_part = chat_id_str.removeprefix('-100') if chat_id_str.startswith('-100') else None
 
     lines = [
-        '➖➖➖➖➖➖➖➖➖➖', f'📢 {team_id}지역 찾기 현황판',
+        '➖➖➖➖➖➖➖➖➖➖', f'📢 {team_id}지역 합당한 자 현황판',
         f"- {_fmt_md(now.date().isoformat())} {now.strftime('%H:%M')} 기준", '',
     ]
     if not groups:

@@ -169,7 +169,7 @@ def erp_sarang_detail(client, body):
              LEFT JOIN MEMBERS m ON m.MEMBER_ID = COALESCE(mh.TEACHER_MEMBER_ID, h.TEACHER_MEMBER_ID)
             WHERE mh.SARANG_ID = :1""", [sid])
     timeline = (
-        [{'at': info['inflow_date'], 'kind': 'inflow', 'label': '유입', 'actor': info['introducer_name']}]
+        [{'at': info['inflow_date'], 'kind': 'inflow', 'label': '찾기', 'actor': info['introducer_name']}]
         + [{'at': r['at'], 'kind': 'call', 'label': r['label'], 'detail': r['detail'], 'actor': r['actor']} for r in calls]
         + [{'at': r['at'], 'kind': 'activity', 'label': r['label'], 'actor': r['actor']} for r in acts]
         + [{'at': r['at'], 'kind': 'match', 'label': _match_label(r),
