@@ -36,6 +36,22 @@ def _json_body(request):
         return {}
 
 
+def _parse_promo_list(text):
+    """저장된 PROMO_LIST 문자열("학교/경로(도구), 학교/경로, 학교") → [{school, path, tool}].
+    프론트 formatPromoItem의 역변환 — 수정 화면이 promoItems로 홍보 학교 행을 다시 채움."""
+    items = []
+    for part in (text or '').split(', '):
+        part = part.strip()
+        if not part:
+            continue
+        school, _, path = part.rpartition('/') if '/' in part else (part, '', '')
+        tool = ''
+        if path.endswith(')') and '(' in path:
+            path, _, tool = path[:-1].partition('(')
+        items.append({'school': school.strip(), 'path': path.strip(), 'tool': tool.strip()})
+    return items
+
+
 @csrf_exempt
 @require_jwt
 def daily_report_list_names(request, *args, **kwargs):
@@ -103,6 +119,7 @@ def daily_report_get(request, *args, **kwargs):
             'qrCount': int(row['qr_count'] or 0),
             'onlineIntakeCount': int(row['online_intake_count'] or 0),
             'promoList': row['promo_list'] or '',
+            'promoItems': _parse_promo_list(row['promo_list']),
             'regList': reg_list,
             'isFinal': row['is_final'] == '1',
             'submittedAt': row['submitted_at'],
