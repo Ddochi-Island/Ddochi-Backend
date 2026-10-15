@@ -83,7 +83,8 @@ def _build_text(team_id, rows, chat_id):
     groups = {}
     for r in rows:
         display_date = _display_date(r, today)
-        if _approved_expired(r, display_date, two_days_ago):
+        # 묶음 날짜(합재양 작성일 기준)가 오늘보다 이전이면 숨김 — 만남 일정은 매칭 현황판에서 봄 (2026-10-15 사용자 결정)
+        if display_date < today or _approved_expired(r, display_date, two_days_ago):
             continue
         key = display_date.isoformat()
         g = groups.setdefault(key, {'total': 0, 'approved': 0, 'items': []})
