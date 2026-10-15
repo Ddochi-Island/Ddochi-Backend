@@ -206,6 +206,7 @@ def get_assets(request, *args, **kwargs):
                  WHERE smh.SARANG_ID IN ({placeholders})
                  ORDER BY smh.MATCH_DEGREE, smh.ATTEMPT_COUNT""",
             sarang_ids,
+            fetch_limit=50000,  # 기본 한도 1000에서 잘려 일부 기록이 빠졌었음(2026-10-15)
         )
         tm_rows = client.query(
             f"""SELECT tl.SARANG_ID, tl.TM_ID AS LOG_ID, trc.LABEL, tl.SUB_REASON, cm.NAME AS ACTOR_NAME,
@@ -216,6 +217,7 @@ def get_assets(request, *args, **kwargs):
                   JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = tl.RESULT
                  WHERE tl.SARANG_ID IN ({placeholders})""",
             sarang_ids,
+            fetch_limit=50000,  # 기본 한도 1000에서 잘려 일부 기록이 빠졌었음(2026-10-15)
         )
         activity_rows = client.query(
             f"""SELECT al.SARANG_ID, al.ACTIVITY_ID AS LOG_ID, al.EVENT_TYPE, am.NAME AS ACTOR_NAME,
@@ -224,6 +226,7 @@ def get_assets(request, *args, **kwargs):
                   FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS am ON am.MEMBER_ID = al.ACTOR_MEMBER_ID
                  WHERE al.SARANG_ID IN ({placeholders})""",
             sarang_ids,
+            fetch_limit=50000,  # 기본 한도 1000에서 잘려 일부 기록이 빠졌었음(2026-10-15)
         )
 
     # MatchingScreen.vue의 formatLogs()가 기대하는 "날짜 | 종류 | 내용 | 작성자" 파이프
@@ -1545,18 +1548,20 @@ def get_shed_prospects(request, *args, **kwargs):
                   sid.REGION_NAME, sid.REACTION, sid.LOCATION, sid.ENV,
                   im.NAME AS INTRODUCER_NAME, sid.HELPER_MEMBER_IDS, sid.APPLIED_AT,
                   -- 가장 최근 '티엠예약' 통화 기록의 예약 시각 우선, 없으면 shed 이관 때 잡은 예약 시각
-                  COALESCE((SELECT MAX(tl.RESERVED_TM_AT) KEEP (DENSE_RANK LAST ORDER BY tl.CREATED_AT)
-                              FROM TM_LOGS tl
-                             WHERE tl.SARANG_ID = s.SARANG_ID AND tl.RESULT = 'RESERVED_TM' AND tl.RESERVED_TM_AT IS NOT NULL),
-                           sid.TM_RESERVED_AT) AS TM_RESERVED_AT,
+                  COALESCE(rsv.RESERVED_AT, sid.TM_RESERVED_AT) AS TM_RESERVED_AT,
                   shjy.HAB_JAE_YANG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, tcm.NAME AS TEACHER_NAME
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              JOIN MEMBERS m ON m.MEMBER_ID = s.INFLOW_MEMBER_ID
-             JOIN MEMBER_AFFILIATION_HISTORIES mah
-               ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
              JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             -- 유입자 소속 — 이미 조인한 sid를 바로 씀(행마다 서브쿼리 돌던 게 5초 중 대부분, 2026-10-15)
+             JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = COALESCE(sid.INTRODUCER_MEMBER_ID, s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
+             -- 가장 최근 '티엠예약' 통화의 예약 시각 — 사람마다 따로 찾지 않고 한 번에 모아서
+             LEFT JOIN (SELECT SARANG_ID, MAX(RESERVED_TM_AT) KEEP (DENSE_RANK LAST ORDER BY CREATED_AT) AS RESERVED_AT
+                          FROM TM_LOGS WHERE RESULT = 'RESERVED_TM' AND RESERVED_TM_AT IS NOT NULL
+                         GROUP BY SARANG_ID) rsv ON rsv.SARANG_ID = s.SARANG_ID
              LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
              LEFT JOIN SARANG_HAB_JAE_YANG shjy ON shjy.SARANG_ID = s.SARANG_ID AND shjy.IS_ACTIVE = 1
              LEFT JOIN MEMBERS gm  ON gm.MEMBER_ID  = shjy.GUIDE_MEMBER_ID
@@ -1564,6 +1569,7 @@ def get_shed_prospects(request, *args, **kwargs):
              LEFT JOIN MEMBERS tcm ON tcm.MEMBER_ID = shjy.TEACHER_MEMBER_ID
             WHERE s.DELETED_AT IS NULL
             ORDER BY s.CREATED_AT DESC""",
+        fetch_limit=50000,  # 기본 한도 1000 — 사랑이가 1000명 넘으면 목록이 잘림
     )
 
     _helper_names = _helper_names_resolver(client, rows)
@@ -1588,12 +1594,14 @@ def get_shed_prospects(request, *args, **kwargs):
                   JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = tl.RESULT
                  WHERE tl.SARANG_ID IN ({placeholders})""",
             sarang_ids,
+            fetch_limit=50000,  # 기본 한도 1000에서 잘려 일부 기록이 빠졌었음(2026-10-15)
         )
         activity_rows = client.query(
             f"""SELECT al.SARANG_ID, al.ACTIVITY_ID AS LOG_ID, al.EVENT_TYPE AS LABEL, al.CREATED_AT, am.NAME AS ACTOR_NAME
                   FROM SARANG_ACTIVITY_LOGS al JOIN MEMBERS am ON am.MEMBER_ID = al.ACTOR_MEMBER_ID
                  WHERE al.SARANG_ID IN ({placeholders})""",
             sarang_ids,
+            fetch_limit=50000,  # 기본 한도 1000에서 잘려 일부 기록이 빠졌었음(2026-10-15)
         )
         # 프론트가 category로 특정 로그 존재 여부를 판단하는 곳(선문자/안받음문자/티엠예약
         # 중복 방지)이 있어 RESULT 코드/EVENT_TYPE 값을 그 값으로 매핑해서 실어줌. TM_LOGS
