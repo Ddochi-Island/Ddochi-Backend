@@ -1479,7 +1479,19 @@ def my_tm_log(request, *args, **kwargs):
         day = datetime.date.fromisoformat(str(body.get('date') or ''))
     except ValueError:
         day = timezone.localdate()
-    rows = DataRouterClient().query(
+    client = DataRouterClient()
+    # 드롭다운용 — 티엠을 돌린 날(KST)과 그날 건수, 최근 90일
+    days = client.query(
+        """SELECT TO_CHAR(tl.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS D, COUNT(*) AS N
+             FROM TM_LOGS tl
+            WHERE tl.CALLER_MEMBER_ID = :1 AND tl.CREATED_AT >= SYSTIMESTAMP - INTERVAL '90' DAY
+            GROUP BY TO_CHAR(tl.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')
+            ORDER BY D DESC""",
+        [request.user['sabun']],
+    )
+    if not body.get('date') and days:
+        day = datetime.date.fromisoformat(days[0]['d'])  # 날짜 안 주면 가장 최근에 돌린 날
+    rows = client.query(
         """SELECT spi.NAME, s.RECRUITMENT_TYPE, trc.LABEL AS RESULT_LABEL, tl.RESULT,
                   COALESCE(tsr.LABEL, tl.SUB_REASON) AS SUB_REASON,
                   TO_CHAR(tl.RESERVED_TM_AT, 'MM/DD HH24:MI') AS RESERVED_AT,
@@ -1499,7 +1511,8 @@ def my_tm_log(request, *args, **kwargs):
         [day.isoformat(), request.user['sabun'], day.isoformat(), day.isoformat()],
         fetch_limit=500,
     )
-    return JsonResponse({'success': True, 'date': day.isoformat(), 'list': [{
+    return JsonResponse({'success': True, 'date': day.isoformat(),
+                         'days': [{'date': d['d'], 'count': int(d['n'])} for d in days], 'list': [{
         'name': r['name'],
         'type': '온라인' if r['recruitment_type'] == 'ONLINE' else '쉐드',  # 오프라인은 쉐드로 통일(사용자 결정)
         'result': r['result_label'],
