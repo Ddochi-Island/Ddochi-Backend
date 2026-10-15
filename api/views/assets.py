@@ -1468,6 +1468,50 @@ def shed_reject_duplicate(request, *args, **kwargs):
 
 @csrf_exempt
 @require_jwt
+def my_tm_log(request, *args, **kwargs):
+    """합당한자 화면 '내 티엠 내역' — 로그인한 사람이 그날(KST 달력 날짜) 돌린 통화 기록.
+    부재중엔 그날 그 통화 뒤 부재중 문자를 보냈는지, 예약 티엠엔 예약 시각을 같이 줌.
+    RESERVED_TM_AT은 입력한 한국 시각이 시간대 변환 없이 저장돼 있어 그대로 'MM/DD HH24:MI'로 꺼냄."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    body = json.loads(request.body or b'{}')
+    try:
+        day = datetime.date.fromisoformat(str(body.get('date') or ''))
+    except ValueError:
+        day = timezone.localdate()
+    rows = DataRouterClient().query(
+        """SELECT spi.NAME, s.RECRUITMENT_TYPE, trc.LABEL AS RESULT_LABEL, tl.RESULT,
+                  COALESCE(tsr.LABEL, tl.SUB_REASON) AS SUB_REASON,
+                  TO_CHAR(tl.RESERVED_TM_AT, 'MM/DD HH24:MI') AS RESERVED_AT,
+                  (SELECT COUNT(*) FROM SARANG_ACTIVITY_LOGS al
+                    WHERE al.SARANG_ID = tl.SARANG_ID AND al.EVENT_TYPE = '부재중문자발송' AND al.CREATED_AT >= tl.CREATED_AT
+                      AND al.CREATED_AT < FROM_TZ(TO_TIMESTAMP(:1, 'YYYY-MM-DD'), 'Asia/Seoul') + INTERVAL '1' DAY) AS NO_ANSWER_MSG,
+                  tl.CREATED_AT
+             FROM TM_LOGS tl
+             JOIN SARANG s ON s.SARANG_ID = tl.SARANG_ID
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = tl.RESULT
+             LEFT JOIN TM_SUB_REASON_CODES tsr ON tsr.RESULT_CODE = tl.RESULT AND tsr.SUB_CODE = tl.SUB_REASON
+            WHERE tl.CALLER_MEMBER_ID = :2
+              AND tl.CREATED_AT >= FROM_TZ(TO_TIMESTAMP(:3, 'YYYY-MM-DD'), 'Asia/Seoul')
+              AND tl.CREATED_AT < FROM_TZ(TO_TIMESTAMP(:4, 'YYYY-MM-DD'), 'Asia/Seoul') + INTERVAL '1' DAY
+            ORDER BY tl.CREATED_AT""",
+        [day.isoformat(), request.user['sabun'], day.isoformat(), day.isoformat()],
+        fetch_limit=500,
+    )
+    return JsonResponse({'success': True, 'date': day.isoformat(), 'list': [{
+        'name': r['name'],
+        'type': '온라인' if r['recruitment_type'] == 'ONLINE' else '쉐드',  # 오프라인은 쉐드로 통일(사용자 결정)
+        'result': r['result_label'],
+        'subReason': r['sub_reason'],
+        'reservedAt': r['reserved_at'] if r['result'] == 'RESERVED_TM' else None,
+        'noAnswerMsg': r['result'] == 'NO_ANSWER' and int(r['no_answer_msg'] or 0) > 0,
+        'at': r['created_at'],
+    } for r in rows]})
+
+
+@csrf_exempt
+@require_jwt
 def get_shed_prospects(request, *args, **kwargs):
     """schema-spec.md(Sarang Domain) 기준 재구현. 질적 찾기(2/4/6팀)·선한 양치기
     (1/3/5팀)는 프론트에서 inflow_member의 현재 소속팀으로 묶어서 보여주는

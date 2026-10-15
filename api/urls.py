@@ -104,6 +104,7 @@ api_urlpatterns = [
     path('shed-register', assets.shed_register, name='assets_shed_register'),
     path('shed-reject-duplicate', assets.shed_reject_duplicate, name='assets_shed_reject_duplicate'),
     path('get-shed-prospects', assets.get_shed_prospects, name='assets_get_shed_prospects'),
+    path('shed/my-tm-log', assets.my_tm_log, name='assets_my_tm_log'),
     path('run-shed-gacha', assets.run_shed_gacha, name='assets_run_shed_gacha'),
     path('cancel-shed-habjaeyang', assets.cancel_shed_habjaeyang, name='assets_cancel_shed_habjaeyang'),
     path('shed-reject', assets.shed_reject, name='assets_shed_reject'),
