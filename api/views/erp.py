@@ -423,7 +423,11 @@ def erp_find(client, body):
             [frm.isoformat(), to.isoformat()], fetch_limit=20000):
         if r['route'] in _OFFLINE_ROUTES:
             m = member(r['member_id'], r['name'], r['region_code'], r['district_code'])
-            m['toolStreet' if r['route'] == '도구노방' else 'offEtc'] += int(r['n'])
+            if r['route'] == '도구노방':
+                m['toolStreet'] += int(r['n'])
+            else:  # 기타 오프 — 프론트에서 열을 펼치면 경로별(off:생노 등)로 보여줌
+                m['offEtc'] += int(r['n'])
+                m['off:' + r['route']] = m.get('off:' + r['route'], 0) + int(r['n'])
 
     return {'members': list(members.values()),
             'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
