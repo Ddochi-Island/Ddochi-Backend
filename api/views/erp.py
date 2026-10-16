@@ -385,7 +385,9 @@ def erp_find(client, body):
     # ONLINE_INTAKE = 온라인 찾기 수, DM = 디엠 보낸 수, QR = 큐알 붙인 수(활동량). 제출 당시 소속 기준
     daily = client.query(
         """SELECT SNAP_REGION_CODE AS REGION_CODE, SNAP_DISTRICT_CODE AS DISTRICT_CODE,
-                  SUM(ONLINE_INTAKE_COUNT) AS ONLINE_FOUND, SUM(DM_COUNT) AS DM, SUM(QR_COUNT) AS QR
+                  SUM(ONLINE_INTAKE_COUNT) AS ONLINE_FOUND, SUM(DM_COUNT) AS DM, SUM(QR_COUNT) AS QR, SUM(TALK_COUNT) AS TALK,
+                  -- 홍보 = 그날 적은 홍보 학교 수("학교/경로(도구), 학교…" 쉼표 구분)
+                  SUM(CASE WHEN PROMO_LIST IS NULL OR DBMS_LOB.GETLENGTH(PROMO_LIST) = 0 THEN 0 ELSE REGEXP_COUNT(PROMO_LIST, ',') + 1 END) AS PROMO
              FROM DAILY_REPORTS
             WHERE DELETED_AT IS NULL AND REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
             GROUP BY SNAP_REGION_CODE, SNAP_DISTRICT_CODE""",
@@ -394,4 +396,5 @@ def erp_find(client, body):
                       'route': r['route'], 'tool': r['tool'],
                       **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows],
             'daily': [{'region': r['region_code'], 'district': r['district_code'],
-                       'onlineFound': int(r['online_found'] or 0), 'dm': int(r['dm'] or 0), 'qr': int(r['qr'] or 0)} for r in daily]}
+                       'onlineFound': int(r['online_found'] or 0), 'dm': int(r['dm'] or 0), 'qr': int(r['qr'] or 0),
+                       'talk': int(r['talk'] or 0), 'promo': int(r['promo'] or 0)} for r in daily]}
