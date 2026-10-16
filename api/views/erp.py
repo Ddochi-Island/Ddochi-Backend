@@ -362,7 +362,22 @@ def erp_funnel(client, body):
 
 
 # ── 찾기 분석 ────
-_OFFLINE_ROUTES = ('도구노방', '생노', '바따장', '노방', '오프찾')  # 프론트 ErpFind.vue OFFLINE_ROUTES와 같게────────────────────────────────────────────
+_OFFLINE_ROUTES = ('도구노방', '생노', '바따장', '노방', '오프찾')  # 프론트 ErpFind.vue OFFLINE_ROUTES와 같게
+
+# 찾기장소·홍보 학교 이름 묶기 — 같은 곳이 "범계/범계역/범계 로데오", "가천대/가천대학교"처럼 여러 이름으로 적혀서.
+# 첫 단어만 쓰고 끝의 역·역사(내)·학교·앞·입구를 뗀 뒤 줄임말을 맞춤. ponytail: 규칙+짧은 별칭표, 새 표기가 쌓이면 별칭표에 추가
+_PLACE_ALIAS = {'성대': '성균관대', '중대': '중앙대', '한대앞': '한양대', '한대': '한양대', '마로니에': '혜화', '외대': '한국외대'}
+_PLACE_SUFFIXES = ('역사내', '역사', '학교', '입구', '정문', '후문', '역', '앞')
+
+
+def _norm_place(text):
+    name = (text or '').strip().split(' ')[0] if (text or '').strip() else ''
+    for _ in range(2):  # "연성대학교앞"처럼 두 번 붙은 것까지
+        for suf in _PLACE_SUFFIXES:
+            if name.endswith(suf) and len(name) > len(suf) + 1:
+                name = name[:-len(suf)]
+                break
+    return _PLACE_ALIAS.get(name, name) or '(미기록)'
 
 @_admin_view
 def erp_find(client, body):
@@ -456,10 +471,49 @@ def erp_find(client, body):
         if r['route'] in _OFFLINE_ROUTES:
             day(r['d'], r['region_code'], r['district_code'])['toolStreet' if r['route'] == '도구노방' else 'offEtc'] += int(r['n'])
 
-    return {'members': list(members.values()), 'timeline': list(timeline.values()),
+    # 찾기장소별(shed 유입) — 찾기 수와 그 뒤 만픽·재가까지 간 수
+    places = {}
+    for r in _q(client, f"""
+        SELECT sid.LOCATION, mah.REGION_CODE, mah.DISTRICT_CODE, {_REACH_SUMS}
+          FROM SARANG s {_INTRO_MAH}
+          JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+         WHERE s.DELETED_AT IS NULL AND sid.SOURCE_LINK IS NOT NULL AND {_in_range('s.INFLOW_DATE')}
+         GROUP BY sid.LOCATION, mah.REGION_CODE, mah.DISTRICT_CODE""", [frm.isoformat(), to.isoformat()], fetch_limit=20000):
+        key = (_norm_place(r['location']), r['region_code'], r['district_code'])
+        p = places.setdefault(key, {'place': key[0], 'region': key[1], 'district': key[2], 'reg': 0, 'meetFix': 0, 'jaega': 0})
+        p['reg'] += int(r['reg'] or 0); p['meetFix'] += int(r['meet_fix'] or 0); p['jaega'] += int(r['jaega'] or 0)
+    # 홍보 학교별 — 일일보고 홍보 학교 목록. 횟수(보고에 적힌 횟수), 다녀간 사람 수, 마지막 날
+    from api.views.daily_report import _parse_promo_list
+    schools = {}
+    for r in client.query(
+        """SELECT dr.MEMBER_ID, dr.SNAP_REGION_CODE AS REGION_CODE, dr.SNAP_DISTRICT_CODE AS DISTRICT_CODE,
+                  TO_CHAR(dr.REPORT_DATE, 'YYYY-MM-DD') AS D, DBMS_LOB.SUBSTR(dr.PROMO_LIST, 4000, 1) AS PROMO
+             FROM DAILY_REPORTS dr
+            WHERE dr.DELETED_AT IS NULL AND dr.PROMO_LIST IS NOT NULL AND DBMS_LOB.GETLENGTH(dr.PROMO_LIST) > 0
+              AND dr.REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')""",
+            [frm.isoformat(), to.isoformat()], fetch_limit=20000):
+        for item in _parse_promo_list(r['promo']):
+            if not item['school']:
+                continue
+            key = (_norm_place(item['school']), r['region_code'], r['district_code'])
+            sc = schools.setdefault(key, {'school': key[0], 'region': key[1], 'district': key[2], 'visits': 0, 'members': set(), 'last': ''})
+            sc['visits'] += 1
+            sc['members'].add(r['member_id'])
+            sc['last'] = max(sc['last'], r['d'])
+
+    return {'places': list(places.values()),
+            'schools': [{**v, 'members': sorted(v['members'])} for v in schools.values()],
+            'members': list(members.values()), 'timeline': list(timeline.values()),
             'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
                       'route': r['route'], 'tool': r['tool'],
                       **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows],
             'daily': [{'region': r['region_code'], 'district': r['district_code'],
                        'onlineFound': int(r['online_found'] or 0), 'dm': int(r['dm'] or 0), 'qr': int(r['qr'] or 0),
                        'talk': int(r['talk'] or 0), 'promo': int(r['promo'] or 0)} for r in daily]}
+
+
+if __name__ == '__main__':  # 이름 묶기 확인: python -m api.views.erp
+    for raw, want in [('범계역', '범계'), ('범계 로데오', '범계'), ('신촌역사내', '신촌'), ('성대 수원', '성균관대'), ('한대앞역', '한양대'),
+                      ('연성대학교 앞', '연성대'), ('가천대학교', '가천대'), ('혜화역 4출', '혜화'), ('성대후문', '성균관대'), ('', '(미기록)'), ('한양대에리카', '한양대에리카')]:
+        assert _norm_place(raw) == want, (raw, _norm_place(raw), want)
+    print('ok')
