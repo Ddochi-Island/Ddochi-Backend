@@ -223,8 +223,9 @@ def erp_tm_stats(client, body):
 
 # ── 기간 지표 (주간 보고서 · 퍼널 기간 내 발생) ───────────────────
 
-def _period_metrics(client, frm, to):
-    """(지역, 구역)별 기간 내 발생 건수. 사랑이 단위 지표는 사람당 한 번만 셈."""
+def _period_metrics(client, frm, to, extended=False):
+    """(지역, 구역)별 기간 내 발생 건수. 사랑이 단위 지표는 사람당 한 번만 셈.
+    extended=True(주간 보고서)면 TM 활동·이관 대기열 지표도 같이."""
     a = [frm.isoformat(), to.isoformat()]
     out = {}
 
@@ -279,13 +280,79 @@ def _period_metrics(client, frm, to):
         for k in ('talk', 'dm', 'qr', 'online_intake', 'reports'):
             m[k] = m.get(k, 0) + int(r[k] or 0)
 
+    if extended:
+        _tm_and_queue_metrics(client, a, add)
+
     return [{'region': k[0], 'district': k[1], **v} for k, v in out.items()]
+
+
+def _tm_and_queue_metrics(client, a, add):
+    # TM 활동 — 통화한 사람(현재 소속) 기준. 결과별 건수 + 티엠 돌린 사람 수 + 통화한 사랑이 수
+    add(_q(client, f"""
+        SELECT mah.REGION_CODE, mah.DISTRICT_CODE, 'tm_' || tl.RESULT AS K, COUNT(*) AS N
+          FROM TM_LOGS tl JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = tl.CALLER_MEMBER_ID AND mah.IS_CURRENT = 1
+         WHERE {_in_range('tl.CREATED_AT')}
+         GROUP BY mah.REGION_CODE, mah.DISTRICT_CODE, tl.RESULT""", a))
+    for key, expr in (('tm_callers', 'tl.CALLER_MEMBER_ID'), ('tm_people', 'tl.SARANG_ID')):
+        add(_q(client, f"""
+            SELECT mah.REGION_CODE, mah.DISTRICT_CODE, COUNT(DISTINCT {expr}) AS N
+              FROM TM_LOGS tl JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = tl.CALLER_MEMBER_ID AND mah.IS_CURRENT = 1
+             WHERE {_in_range('tl.CREATED_AT')}
+             GROUP BY mah.REGION_CODE, mah.DISTRICT_CODE""", a), key)
+    # 이관받고 첫 통화까지 — 기간 안에 이관받은 사람 기준(유입자 지역). 평균은 프론트에서 합/건수로
+    for r in _q(client, f"""
+        SELECT mah.REGION_CODE, mah.DISTRICT_CODE, COUNT(*) AS N,
+               SUM((CAST(f.FIRST_AT AS DATE) - CAST(s.CREATED_AT AS DATE)) * 24) AS HOURS
+          FROM SARANG s
+          JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+          JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = COALESCE(sid.INTRODUCER_MEMBER_ID, s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
+          JOIN (SELECT SARANG_ID, MIN(CREATED_AT) AS FIRST_AT FROM TM_LOGS GROUP BY SARANG_ID) f ON f.SARANG_ID = s.SARANG_ID
+         WHERE s.DELETED_AT IS NULL AND {_in_range('s.CREATED_AT')}
+         GROUP BY mah.REGION_CODE, mah.DISTRICT_CODE""", a):
+        add([{**r, 'k': 'ft_n'}])
+        add([{**r, 'k': 'ft_hours', 'n': round(float(r['hours'] or 0))}])
+    # 이관 대기열 — 유입자 지역(없으면 shed 링크 번호). 신청 = shed 신청 시각, 이관·반려 = 처리 시각
+    q_mah = """LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND mah.IS_CURRENT = 1"""
+    add(_q(client, f"""
+        SELECT COALESCE(mah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) AS REGION_CODE, mah.DISTRICT_CODE, COUNT(*) AS N
+          FROM SARANG_INTAKE_QUEUE q {q_mah}
+         WHERE {_in_range('COALESCE(q.APPLIED_AT, q.CREATED_AT)')}
+         GROUP BY COALESCE(mah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)), mah.DISTRICT_CODE""", a), 'q_in')
+    for r in _q(client, f"""
+        SELECT COALESCE(mah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) AS REGION_CODE, mah.DISTRICT_CODE, q.STATUS,
+               COUNT(*) AS N,
+               SUM((CAST(q.REVIEWED_AT AS DATE) - CAST(COALESCE(q.APPLIED_AT, q.CREATED_AT) AS DATE)) * 24) AS HOURS,
+               SUM(CASE WHEN CAST(q.REVIEWED_AT AS DATE) - CAST(COALESCE(q.APPLIED_AT, q.CREATED_AT) AS DATE) >= 4 THEN 1 ELSE 0 END) AS LATE
+          FROM SARANG_INTAKE_QUEUE q {q_mah}
+         WHERE q.STATUS IN ('accepted', 'rejected') AND {_in_range('q.REVIEWED_AT')}
+         GROUP BY COALESCE(mah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)), mah.DISTRICT_CODE, q.STATUS""", a):
+        if r['status'] == 'accepted':
+            add([{**r, 'k': 'q_accepted'}])
+            add([{**r, 'k': 'q_wait_hours', 'n': round(float(r['hours'] or 0))}])
+            add([{**r, 'k': 'q_late', 'n': r['late']}])  # 신청 4일 지나 이관받음(전체 공개로 넘어간 뒤)
+        else:
+            add([{**r, 'k': 'q_rejected'}])
+
+
+def _queue_now(client):
+    """지금 이관 대기 중인 건 — 기간과 무관한 현재 상태. 4일 넘게 기다리는 건(전체 공개) 따로."""
+    rows = client.query(
+        """SELECT COALESCE(mah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)) AS REGION_CODE, mah.DISTRICT_CODE, COUNT(*) AS N,
+                  SUM(CASE WHEN SYSDATE - CAST(COALESCE(q.APPLIED_AT, q.CREATED_AT) AS DATE) >= 4 THEN 1 ELSE 0 END) AS OLD
+             FROM SARANG_INTAKE_QUEUE q
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = q.INTRODUCER_MEMBER_ID AND mah.IS_CURRENT = 1
+            WHERE q.STATUS IN ('pending', 'submitted')
+            GROUP BY COALESCE(mah.REGION_CODE, TO_CHAR(q.SOURCE_LINK)), mah.DISTRICT_CODE""")
+    return [{'region': r['region_code'], 'district': r['district_code'], 'waiting': int(r['n']), 'waitingOld': int(r['old'] or 0)}
+            for r in rows]
 
 
 @_admin_view
 def erp_weekly(client, body):
     frm, to = _dates(body)
-    prev_frm, prev_to = frm - datetime.timedelta(days=7), to - datetime.timedelta(days=7)
+    # 비교 기간 = 같은 길이의 바로 앞 기간 (한 주면 전주, 한 달이면 전달 같은 길이)
+    span = (to - frm).days + 1
+    prev_frm, prev_to = frm - datetime.timedelta(days=span), to - datetime.timedelta(days=span)
     a = [frm.isoformat(), to.isoformat()]
     jaega = _q(client, f"""
         SELECT * FROM (
@@ -318,8 +385,9 @@ def erp_weekly(client, body):
     return {
         'range': {'from': frm.isoformat(), 'to': to.isoformat()},
         'prevRange': {'from': prev_frm.isoformat(), 'to': prev_to.isoformat()},
-        'cur': _period_metrics(client, frm, to),
-        'prev': _period_metrics(client, prev_frm, prev_to),
+        'cur': _period_metrics(client, frm, to, extended=True),
+        'prev': _period_metrics(client, prev_frm, prev_to, extended=True),
+        'queueNow': _queue_now(client),
         'jaegaDetails': jaega,
         'matchDetails': matches,
     }
