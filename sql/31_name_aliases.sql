@@ -1,0 +1,10 @@
+-- 찾기장소·홍보 학교 이름 통일 — 원래 입력값(SARANG_INFLOW_DETAILS.LOCATION, DAILY_REPORTS.PROMO_LIST)은 그대로 두고
+-- "원래 표기 → 표준 이름"만 여기 저장. ERP '이름 정리' 화면에서 관리, 찾기 분석이 집계할 때 먼저 적용(없으면 자동 규칙)
+CREATE TABLE NAME_ALIASES (
+  KIND        VARCHAR2(10 CHAR)            NOT NULL CHECK (KIND IN ('place', 'school')),
+  RAW_NAME    VARCHAR2(300 CHAR)           NOT NULL,
+  CANONICAL   VARCHAR2(100 CHAR)           NOT NULL,
+  UPDATED_BY  VARCHAR2(50 CHAR)            NOT NULL,
+  UPDATED_AT  TIMESTAMP(6) WITH TIME ZONE  DEFAULT SYSTIMESTAMP NOT NULL,
+  CONSTRAINT PK_NAME_ALIASES PRIMARY KEY (KIND, RAW_NAME)
+);

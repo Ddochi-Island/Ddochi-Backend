@@ -89,6 +89,7 @@ def _admin_view(fn):
         if not _is_admin(request, client):
             return JsonResponse({'success': False, 'message': '관리자만 볼 수 있어'}, status=403)
         body = _json_body(request)
+        body['_sabun'] = request.user['sabun']  # 저장 API가 누가 바꿨는지 남길 때 씀
         try:
             return JsonResponse({'success': True, **fn(client, body)})
         except ValueError as e:
@@ -379,6 +380,18 @@ def _norm_place(text):
                 break
     return _PLACE_ALIAS.get(name, name) or '(미기록)'
 
+
+def _alias_map(client, kind):
+    """ERP '이름 정리'에서 지정한 원래 표기 → 표준 이름 (NAME_ALIASES)."""
+    return {r['raw_name']: r['canonical'] for r in client.query(
+        "SELECT RAW_NAME, CANONICAL FROM NAME_ALIASES WHERE KIND = :1", [kind], fetch_limit=20000)}
+
+
+def _canon(raw, aliases):
+    """지정한 별칭이 먼저, 없으면 자동 규칙(_norm_place)."""
+    raw = (raw or '').strip()
+    return aliases.get(raw) or _norm_place(raw)
+
 @_admin_view
 def erp_find(client, body):
     """기간 안에 찾은 사람을 찾기 경로·도구별로 — 그 뒤 만픽·합재양·재가·만남·상연까지 간 수.
@@ -445,6 +458,7 @@ def erp_find(client, body):
                 m['off:' + r['route']] = m.get('off:' + r['route'], 0) + int(r['n'])
 
     # 찾기장소별(shed 유입) — 찾기 수와 그 뒤 만픽·재가까지 간 수
+    place_alias = _alias_map(client, 'place')
     places = {}
     for r in _q(client, f"""
         SELECT sid.LOCATION, mah.REGION_CODE, mah.DISTRICT_CODE, {_REACH_SUMS}
@@ -452,11 +466,12 @@ def erp_find(client, body):
           JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
          WHERE s.DELETED_AT IS NULL AND sid.SOURCE_LINK IS NOT NULL AND {_in_range('s.INFLOW_DATE')}
          GROUP BY sid.LOCATION, mah.REGION_CODE, mah.DISTRICT_CODE""", [frm.isoformat(), to.isoformat()], fetch_limit=20000):
-        key = (_norm_place(r['location']), r['region_code'], r['district_code'])
+        key = (_canon(r['location'], place_alias), r['region_code'], r['district_code'])
         p = places.setdefault(key, {'place': key[0], 'region': key[1], 'district': key[2], 'reg': 0, 'meetFix': 0, 'jaega': 0})
         p['reg'] += int(r['reg'] or 0); p['meetFix'] += int(r['meet_fix'] or 0); p['jaega'] += int(r['jaega'] or 0)
     # 홍보 학교별 — 일일보고 홍보 학교 목록(홍보는 에브리타임). 횟수(보고에 적힌 횟수), 마지막 날
     from api.views.daily_report import _parse_promo_list
+    school_alias = _alias_map(client, 'school')
     schools = {}
     for r in client.query(
         """SELECT dr.SNAP_REGION_CODE AS REGION_CODE, dr.SNAP_DISTRICT_CODE AS DISTRICT_CODE,
@@ -468,7 +483,7 @@ def erp_find(client, body):
         for item in _parse_promo_list(r['promo']):
             if not item['school']:
                 continue
-            key = (_norm_place(item['school']), r['region_code'], r['district_code'])
+            key = (_canon(item['school'], school_alias), r['region_code'], r['district_code'])
             sc = schools.setdefault(key, {'school': key[0], 'region': key[1], 'district': key[2], 'visits': 0, 'last': ''})
             sc['visits'] += 1
             sc['last'] = max(sc['last'], r['d'])
@@ -482,6 +497,64 @@ def erp_find(client, body):
             'daily': [{'region': r['region_code'], 'district': r['district_code'],
                        'onlineFound': int(r['online_found'] or 0), 'dm': int(r['dm'] or 0), 'qr': int(r['qr'] or 0),
                        'talk': int(r['talk'] or 0), 'promo': int(r['promo'] or 0)} for r in daily]}
+
+
+# ── 이름 정리(찾기장소·홍보 학교) ─────────────────────────────
+
+def _raw_name_counts(client, kind):
+    """원래 표기별 건수 — 장소는 shed 유입 전체, 학교는 최근 1년 일일보고 홍보 학교."""
+    if kind == 'place':
+        return {(r['raw_text'] or ''): int(r['n']) for r in client.query(
+            """SELECT TRIM(sid.LOCATION) AS RAW_TEXT, COUNT(*) AS N
+                 FROM SARANG_INFLOW_DETAILS sid JOIN SARANG s ON s.SARANG_ID = sid.SARANG_ID AND s.DELETED_AT IS NULL
+                WHERE sid.SOURCE_LINK IS NOT NULL
+                GROUP BY TRIM(sid.LOCATION)""", fetch_limit=20000)}
+    from api.views.daily_report import _parse_promo_list
+    counts = {}
+    for r in client.query(
+        """SELECT DBMS_LOB.SUBSTR(PROMO_LIST, 4000, 1) AS PROMO FROM DAILY_REPORTS
+            WHERE DELETED_AT IS NULL AND PROMO_LIST IS NOT NULL AND DBMS_LOB.GETLENGTH(PROMO_LIST) > 0
+              AND REPORT_DATE >= ADD_MONTHS(TRUNC(SYSDATE), -12)""", fetch_limit=50000):
+        for item in _parse_promo_list(r['promo']):
+            if item['school']:
+                counts[item['school']] = counts.get(item['school'], 0) + 1
+    return counts
+
+
+def _kind(body):
+    kind = str(body.get('kind') or '')
+    if kind not in ('place', 'school'):
+        raise ValueError('kind는 place 또는 school')
+    return kind
+
+
+@_admin_view
+def erp_names(client, body):
+    kind = _kind(body)
+    aliases = _alias_map(client, kind)
+    rows = [{'raw': raw, 'count': n, 'auto': _norm_place(raw), 'canonical': _canon(raw, aliases), 'aliased': raw.strip() in aliases}
+            for raw, n in _raw_name_counts(client, kind).items()]
+    return {'rows': rows}
+
+
+@_admin_view
+def erp_names_set(client, body):
+    """원래 표기 하나의 표준 이름 지정. canonical을 비우면 지정 해제(자동 규칙으로 돌아감)."""
+    kind = _kind(body)
+    raw = str(body.get('raw') or '').strip()
+    canonical = str(body.get('canonical') or '').strip()[:100]
+    if not raw:
+        raise ValueError('원래 표기가 비었어')
+    if not canonical:
+        client.exec("DELETE FROM NAME_ALIASES WHERE KIND = :1 AND RAW_NAME = :2", [kind, raw])
+        return {}
+    client.exec(
+        """MERGE INTO NAME_ALIASES a USING (SELECT :1 AS KIND, :2 AS RAW_NAME FROM dual) s
+              ON (a.KIND = s.KIND AND a.RAW_NAME = s.RAW_NAME)
+           WHEN MATCHED THEN UPDATE SET CANONICAL = :3, UPDATED_BY = :4, UPDATED_AT = SYSTIMESTAMP
+           WHEN NOT MATCHED THEN INSERT (KIND, RAW_NAME, CANONICAL, UPDATED_BY) VALUES (:5, :6, :7, :8)""",
+        [kind, raw, canonical, body['_sabun'], kind, raw, canonical, body['_sabun']])
+    return {}
 
 
 if __name__ == '__main__':  # 이름 묶기 확인: python -m api.views.erp
