@@ -361,7 +361,8 @@ def erp_funnel(client, body):
     }
 
 
-# ── 찾기 분석 ────────────────────────────────────────────────
+# ── 찾기 분석 ────
+_OFFLINE_ROUTES = ('도구노방', '생노', '바따장', '노방', '오프찾')  # 프론트 ErpFind.vue OFFLINE_ROUTES와 같게────────────────────────────────────────────
 
 @_admin_view
 def erp_find(client, body):
@@ -392,7 +393,40 @@ def erp_find(client, body):
             WHERE DELETED_AT IS NULL AND REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
             GROUP BY SNAP_REGION_CODE, SNAP_DISTRICT_CODE""",
         [frm.isoformat(), to.isoformat()], fetch_limit=5000)
-    return {'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
+    # 사람별 — 구역을 펼치면 보여줌. 활동량·온라인 찾기는 일일보고 낸 사람(제출 당시 소속), 오프 찾기는 유입자(현재 소속)
+    members = {}
+
+    def member(mid, name, region, district):
+        return members.setdefault((mid, region, district), {
+            'memberId': mid, 'name': name, 'region': region, 'district': district,
+            'talk': 0, 'dm': 0, 'qr': 0, 'promo': 0, 'onlineFound': 0, 'toolStreet': 0, 'offEtc': 0})
+    for r in client.query(
+        """SELECT dr.MEMBER_ID, m.NAME, dr.SNAP_REGION_CODE AS REGION_CODE, dr.SNAP_DISTRICT_CODE AS DISTRICT_CODE,
+                  SUM(dr.ONLINE_INTAKE_COUNT) AS ONLINE_FOUND, SUM(dr.DM_COUNT) AS DM, SUM(dr.QR_COUNT) AS QR, SUM(dr.TALK_COUNT) AS TALK,
+                  SUM(CASE WHEN dr.PROMO_LIST IS NULL OR DBMS_LOB.GETLENGTH(dr.PROMO_LIST) = 0 THEN 0 ELSE REGEXP_COUNT(dr.PROMO_LIST, ',') + 1 END) AS PROMO
+             FROM DAILY_REPORTS dr JOIN MEMBERS m ON m.MEMBER_ID = dr.MEMBER_ID
+            WHERE dr.DELETED_AT IS NULL AND dr.REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
+            GROUP BY dr.MEMBER_ID, m.NAME, dr.SNAP_REGION_CODE, dr.SNAP_DISTRICT_CODE""",
+            [frm.isoformat(), to.isoformat()], fetch_limit=20000):
+        m = member(r['member_id'], r['name'], r['region_code'], r['district_code'])
+        for k, col in (('talk', 'talk'), ('dm', 'dm'), ('qr', 'qr'), ('promo', 'promo'), ('onlineFound', 'online_found')):
+            m[k] += int(r[col] or 0)
+    for r in _q(client, f"""
+        SELECT im.MEMBER_ID, im.NAME, mah.REGION_CODE, mah.DISTRICT_CODE,
+               COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END) AS ROUTE, COUNT(*) AS N
+          FROM SARANG s {_INTRO_MAH}
+          JOIN MEMBERS im ON im.MEMBER_ID = mah.MEMBER_ID
+          LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+          LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+         WHERE s.DELETED_AT IS NULL AND {_in_range('s.INFLOW_DATE')}
+         GROUP BY im.MEMBER_ID, im.NAME, mah.REGION_CODE, mah.DISTRICT_CODE, COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END)""",
+            [frm.isoformat(), to.isoformat()], fetch_limit=20000):
+        if r['route'] in _OFFLINE_ROUTES:
+            m = member(r['member_id'], r['name'], r['region_code'], r['district_code'])
+            m['toolStreet' if r['route'] == '도구노방' else 'offEtc'] += int(r['n'])
+
+    return {'members': list(members.values()),
+            'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
                       'route': r['route'], 'tool': r['tool'],
                       **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows],
             'daily': [{'region': r['region_code'], 'district': r['district_code'],
