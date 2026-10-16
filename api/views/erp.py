@@ -455,11 +455,11 @@ def erp_find(client, body):
         key = (_norm_place(r['location']), r['region_code'], r['district_code'])
         p = places.setdefault(key, {'place': key[0], 'region': key[1], 'district': key[2], 'reg': 0, 'meetFix': 0, 'jaega': 0})
         p['reg'] += int(r['reg'] or 0); p['meetFix'] += int(r['meet_fix'] or 0); p['jaega'] += int(r['jaega'] or 0)
-    # 홍보 학교별 — 일일보고 홍보 학교 목록. 횟수(보고에 적힌 횟수), 다녀간 사람 수, 마지막 날
+    # 홍보 학교별 — 일일보고 홍보 학교 목록(홍보는 에브리타임). 횟수(보고에 적힌 횟수), 마지막 날
     from api.views.daily_report import _parse_promo_list
     schools = {}
     for r in client.query(
-        """SELECT dr.MEMBER_ID, dr.SNAP_REGION_CODE AS REGION_CODE, dr.SNAP_DISTRICT_CODE AS DISTRICT_CODE,
+        """SELECT dr.SNAP_REGION_CODE AS REGION_CODE, dr.SNAP_DISTRICT_CODE AS DISTRICT_CODE,
                   TO_CHAR(dr.REPORT_DATE, 'YYYY-MM-DD') AS D, DBMS_LOB.SUBSTR(dr.PROMO_LIST, 4000, 1) AS PROMO
              FROM DAILY_REPORTS dr
             WHERE dr.DELETED_AT IS NULL AND dr.PROMO_LIST IS NOT NULL AND DBMS_LOB.GETLENGTH(dr.PROMO_LIST) > 0
@@ -469,13 +469,12 @@ def erp_find(client, body):
             if not item['school']:
                 continue
             key = (_norm_place(item['school']), r['region_code'], r['district_code'])
-            sc = schools.setdefault(key, {'school': key[0], 'region': key[1], 'district': key[2], 'visits': 0, 'members': set(), 'last': ''})
+            sc = schools.setdefault(key, {'school': key[0], 'region': key[1], 'district': key[2], 'visits': 0, 'last': ''})
             sc['visits'] += 1
-            sc['members'].add(r['member_id'])
             sc['last'] = max(sc['last'], r['d'])
 
     return {'places': list(places.values()),
-            'schools': [{**v, 'members': sorted(v['members'])} for v in schools.values()],
+            'schools': list(schools.values()),
             'members': list(members.values()),
             'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
                       'route': r['route'], 'tool': r['tool'],
