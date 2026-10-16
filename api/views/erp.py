@@ -429,7 +429,34 @@ def erp_find(client, body):
                 m['offEtc'] += int(r['n'])
                 m['off:' + r['route']] = m.get('off:' + r['route'], 0) + int(r['n'])
 
-    return {'members': list(members.values()),
+    # 날짜별 찾기 — 선 그래프용. 온라인 = 일일보고 날짜(REPORT_DATE, 22시 롤오버된 영업일), 오프 = shed로 찾은 날(KST)
+    timeline = {}
+
+    def day(d, region, district):
+        return timeline.setdefault((d, region, district), {'date': d, 'region': region, 'district': district,
+                                                           'onlineFound': 0, 'toolStreet': 0, 'offEtc': 0})
+    for r in client.query(
+        """SELECT TO_CHAR(REPORT_DATE, 'YYYY-MM-DD') AS D, SNAP_REGION_CODE AS REGION_CODE, SNAP_DISTRICT_CODE AS DISTRICT_CODE,
+                  SUM(ONLINE_INTAKE_COUNT) AS N
+             FROM DAILY_REPORTS
+            WHERE DELETED_AT IS NULL AND REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
+            GROUP BY REPORT_DATE, SNAP_REGION_CODE, SNAP_DISTRICT_CODE""",
+            [frm.isoformat(), to.isoformat()], fetch_limit=20000):
+        day(r['d'], r['region_code'], r['district_code'])['onlineFound'] += int(r['n'] or 0)
+    for r in _q(client, f"""
+        SELECT TO_CHAR(s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS D, mah.REGION_CODE, mah.DISTRICT_CODE,
+               COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END) AS ROUTE, COUNT(*) AS N
+          FROM SARANG s {_INTRO_MAH}
+          LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+          LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+         WHERE s.DELETED_AT IS NULL AND {_in_range('s.INFLOW_DATE')}
+         GROUP BY TO_CHAR(s.INFLOW_DATE AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD'), mah.REGION_CODE, mah.DISTRICT_CODE,
+                  COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END)""",
+            [frm.isoformat(), to.isoformat()], fetch_limit=20000):
+        if r['route'] in _OFFLINE_ROUTES:
+            day(r['d'], r['region_code'], r['district_code'])['toolStreet' if r['route'] == '도구노방' else 'offEtc'] += int(r['n'])
+
+    return {'members': list(members.values()), 'timeline': list(timeline.values()),
             'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
                       'route': r['route'], 'tool': r['tool'],
                       **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows],
