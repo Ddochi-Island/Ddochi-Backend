@@ -381,6 +381,17 @@ def erp_find(client, body):
                   COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END),
                   COALESCE(hj.TOOL, CASE WHEN hj.SARANG_ID IS NULL AND sid.SOURCE_LINK IS NOT NULL THEN '사쉐' END)""",
         [frm.isoformat(), to.isoformat()], fetch_limit=20000)
+    # 온라인은 합재양 때 처음 등록돼 사람 단위 찾기 기록이 없음 → 일일보고 숫자를 씀(2026-10-16 사용자 결정).
+    # ONLINE_INTAKE = 온라인 찾기 수, DM = 디엠 보낸 수, QR = 큐알 붙인 수(활동량). 제출 당시 소속 기준
+    daily = client.query(
+        """SELECT SNAP_REGION_CODE AS REGION_CODE, SNAP_DISTRICT_CODE AS DISTRICT_CODE,
+                  SUM(ONLINE_INTAKE_COUNT) AS ONLINE_FOUND, SUM(DM_COUNT) AS DM, SUM(QR_COUNT) AS QR
+             FROM DAILY_REPORTS
+            WHERE DELETED_AT IS NULL AND REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
+            GROUP BY SNAP_REGION_CODE, SNAP_DISTRICT_CODE""",
+        [frm.isoformat(), to.isoformat()], fetch_limit=5000)
     return {'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
                       'route': r['route'], 'tool': r['tool'],
-                      **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows]}
+                      **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows],
+            'daily': [{'region': r['region_code'], 'district': r['district_code'],
+                       'onlineFound': int(r['online_found'] or 0), 'dm': int(r['dm'] or 0), 'qr': int(r['qr'] or 0)} for r in daily]}
