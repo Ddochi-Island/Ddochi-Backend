@@ -116,6 +116,7 @@ api_urlpatterns = [
     path('shed/rejected-list', assets.shed_pending_rejected_list, name='assets_shed_pending_rejected_list'),
     path('shed-pending-revive', assets.shed_pending_revive, name='assets_shed_pending_revive'),
     path('daily-report/list-names', daily_report.daily_report_list_names, name='daily_report_daily_report_list_names'),
+    path('daily-report/promo-schools', daily_report.daily_report_promo_schools, name='daily_report_promo_schools'),
     path('daily-report/get', daily_report.daily_report_get, name='daily_report_daily_report_get'),
     path('daily-report', daily_report.daily_report, name='daily_report_daily_report'),
     path('daily-report/search-reg', daily_report.daily_report_search_reg, name='daily_report_daily_report_search_reg'),

@@ -372,3 +372,21 @@ def daily_report_reflections(request, *args, **kwargs):
     return JsonResponse({'success': True, 'scope': scope, 'teams': teams,
                          'dateFrom': date_from, 'dateTo': date_to, 'list': items})
 
+
+
+@csrf_exempt
+@require_jwt
+def daily_report_promo_schools(request, *args, **kwargs):
+    """홍보 학교 자동완성 — 최근 1년 일일보고에 적힌 학교를 표준 이름(ERP '이름 정리' 별칭 → 자동 규칙)으로 묶어
+    많이 쓴 순서로. 같은 학교를 여러 표기로 적지 않게 입력할 때 고르게 함."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    from api.views.erp import _alias_map, _canon, _raw_name_counts  # erp가 이 모듈을 import해서 위로 못 올림(순환)
+    client = DataRouterClient()
+    aliases = _alias_map(client, 'school')
+    counts = {}
+    for raw, n in _raw_name_counts(client, 'school').items():
+        name = _canon(raw, aliases)
+        if name != '(미기록)':
+            counts[name] = counts.get(name, 0) + n
+    return JsonResponse({'success': True, 'schools': [k for k, _ in sorted(counts.items(), key=lambda x: -x[1])]})
