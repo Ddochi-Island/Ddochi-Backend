@@ -28,6 +28,23 @@ _STAGES_FROM = {  # 그 단계 이상(드랍돼도 STAGE는 그대로 남음)
     '상따': "('상따','성홀','성따','복방','센')",
 }
 
+# 기간 안에 유입된 사람(s)이 지금까지 각 단계에 도달했나 — 전환 퍼널·찾기 분석 공용 SELECT 조각
+_REACH_SUMS = f"""COUNT(*) AS REG,
+               SUM(CASE WHEN s.STAGE IN {_STAGES_FROM['만픽']} OR EXISTS (SELECT 1 FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX')
+                        THEN 1 ELSE 0 END) AS MEET_FIX,
+               SUM(CASE WHEN s.STAGE IN {_STAGES_FROM['합재양']} OR EXISTS (SELECT 1 FROM SARANG_HAB_JAE_YANG h WHERE h.SARANG_ID = s.SARANG_ID)
+                        THEN 1 ELSE 0 END) AS HJY,
+               SUM(CASE WHEN s.STAGE IN {_STAGES_FROM['재가']}
+                          OR EXISTS (SELECT 1 FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리')
+                          OR EXISTS (SELECT 1 FROM SARANG_HAB_JAE_YANG h WHERE h.SARANG_ID = s.SARANG_ID AND h.APPROVAL_STATUS = 'approved')
+                        THEN 1 ELSE 0 END) AS JAEGA,
+               SUM(CASE WHEN s.STAGE IN {_STAGES_FROM['상따']}
+                          OR EXISTS (SELECT 1 FROM SARANG_MATCH_HISTORIES mh WHERE mh.SARANG_ID = s.SARANG_ID AND mh.RESULT IN {_MET_RESULTS})
+                        THEN 1 ELSE 0 END) AS MET,
+               SUM(CASE WHEN s.STAGE IN {_STAGES_FROM['상따']}
+                          OR EXISTS (SELECT 1 FROM SARANG_MATCH_HISTORIES mh WHERE mh.SARANG_ID = s.SARANG_ID AND mh.RESULT = 'CONSULT_WIN')
+                        THEN 1 ELSE 0 END) AS CONSULT"""
+
 
 def _in_range(col):
     """KST 달력 날짜 [from, to] — 바인드 2개(from, to 문자열 'YYYY-MM-DD')를 차례로 받음."""
@@ -331,24 +348,9 @@ def erp_weekly(client, body):
 def erp_funnel(client, body):
     """cohort = 기간 안에 유입된 사람들이 지금까지 어디까지 갔나 / event = 기간 안에 각 단계가 몇 건 일어났나."""
     frm, to = _dates(body)
-    s = _STAGES_FROM
     cohort = _q(client, f"""
         SELECT mah.REGION_CODE, mah.DISTRICT_CODE, s.RECRUITMENT_TYPE,
-               COUNT(*) AS REG,
-               SUM(CASE WHEN s.STAGE IN {s['만픽']} OR EXISTS (SELECT 1 FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX')
-                        THEN 1 ELSE 0 END) AS MEET_FIX,
-               SUM(CASE WHEN s.STAGE IN {s['합재양']} OR EXISTS (SELECT 1 FROM SARANG_HAB_JAE_YANG h WHERE h.SARANG_ID = s.SARANG_ID)
-                        THEN 1 ELSE 0 END) AS HJY,
-               SUM(CASE WHEN s.STAGE IN {s['재가']}
-                          OR EXISTS (SELECT 1 FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리')
-                          OR EXISTS (SELECT 1 FROM SARANG_HAB_JAE_YANG h WHERE h.SARANG_ID = s.SARANG_ID AND h.APPROVAL_STATUS = 'approved')
-                        THEN 1 ELSE 0 END) AS JAEGA,
-               SUM(CASE WHEN s.STAGE IN {s['상따']}
-                          OR EXISTS (SELECT 1 FROM SARANG_MATCH_HISTORIES mh WHERE mh.SARANG_ID = s.SARANG_ID AND mh.RESULT IN {_MET_RESULTS})
-                        THEN 1 ELSE 0 END) AS MET,
-               SUM(CASE WHEN s.STAGE IN {s['상따']}
-                          OR EXISTS (SELECT 1 FROM SARANG_MATCH_HISTORIES mh WHERE mh.SARANG_ID = s.SARANG_ID AND mh.RESULT = 'CONSULT_WIN')
-                        THEN 1 ELSE 0 END) AS CONSULT
+               {_REACH_SUMS}
           FROM SARANG s {_INTRO_MAH}
          WHERE s.DELETED_AT IS NULL AND {_in_range('s.INFLOW_DATE')}
          GROUP BY mah.REGION_CODE, mah.DISTRICT_CODE, s.RECRUITMENT_TYPE""", [frm.isoformat(), to.isoformat()])
@@ -357,3 +359,28 @@ def erp_funnel(client, body):
                     **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in cohort],
         'event': _period_metrics(client, frm, to),
     }
+
+
+# ── 찾기 분석 ────────────────────────────────────────────────
+
+@_admin_view
+def erp_find(client, body):
+    """기간 안에 찾은 사람을 찾기 경로·도구별로 — 그 뒤 만픽·합재양·재가·만남·상연까지 간 수.
+    경로·도구는 합재양 작성 때 저장됨. 합재양 전인 shed 유입(오프)은 도구노방(사쉐)으로 봄."""
+    frm, to = _dates(body)
+    rows = _q(client, f"""
+        SELECT mah.REGION_CODE, mah.DISTRICT_CODE, s.RECRUITMENT_TYPE,
+               COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END) AS ROUTE,
+               COALESCE(hj.TOOL, CASE WHEN hj.SARANG_ID IS NULL AND sid.SOURCE_LINK IS NOT NULL THEN '사쉐' END) AS TOOL,
+               {_REACH_SUMS}
+          FROM SARANG s {_INTRO_MAH}
+          LEFT JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+          LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
+         WHERE s.DELETED_AT IS NULL AND {_in_range('s.INFLOW_DATE')}
+         GROUP BY mah.REGION_CODE, mah.DISTRICT_CODE, s.RECRUITMENT_TYPE,
+                  COALESCE(hj.ROUTE, CASE WHEN sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END),
+                  COALESCE(hj.TOOL, CASE WHEN hj.SARANG_ID IS NULL AND sid.SOURCE_LINK IS NOT NULL THEN '사쉐' END)""",
+        [frm.isoformat(), to.isoformat()], fetch_limit=20000)
+    return {'rows': [{'region': r['region_code'], 'district': r['district_code'], 'type': r['recruitment_type'],
+                      'route': r['route'], 'tool': r['tool'],
+                      **{k: int(r[k] or 0) for k in ('reg', 'meet_fix', 'hjy', 'jaega', 'met', 'consult')}} for r in rows]}
