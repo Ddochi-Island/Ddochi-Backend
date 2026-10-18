@@ -563,6 +563,28 @@ def erp_names_set(client, body):
     return {}
 
 
+# ── 주간 찾기 명단(shed) ─────────────────────────────────────
+
+@_admin_view
+def erp_find_list(client, body):
+    """shed로 들어온 사람 — 이관받은 날(SARANG 생성 시각, KST) 기준 기간 안. 섭외자·인도자·유입자·소속·찾기장소·단계."""
+    frm, to = _dates(body)
+    rows = _q(client, f"""
+        SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.CREATED_AT AS ACCEPTED_AT, sid.APPLIED_AT, sid.LOCATION,
+               COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, gm.NAME AS GUIDE_NAME, mah.REGION_CODE, mah.DISTRICT_CODE
+          FROM SARANG s
+          JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+          JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID AND sid.SOURCE_LINK IS NOT NULL
+          JOIN MEMBERS m ON m.MEMBER_ID = s.INFLOW_MEMBER_ID
+          {_INTRO_MAH}
+          LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
+          LEFT JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = s.SARANG_ID AND h.IS_ACTIVE = 1
+          LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = h.GUIDE_MEMBER_ID
+         WHERE s.DELETED_AT IS NULL AND {_in_range('s.CREATED_AT')}
+         ORDER BY s.CREATED_AT""", [frm.isoformat(), to.isoformat()], fetch_limit=5000)
+    return {'rows': rows}
+
+
 if __name__ == '__main__':  # 이름 묶기 확인: python -m api.views.erp
     for raw, want in [('범계역', '범계'), ('범계 로데오', '범계'), ('신촌역사내', '신촌'), ('성대 수원', '성균관대'), ('한대앞역', '한양대'),
                       ('연성대학교 앞', '연성대'), ('가천대학교', '가천대'), ('혜화역 4출', '혜화'), ('성대후문', '성균관대'), ('', '(미기록)'), ('한양대에리카', '한양대에리카')]:

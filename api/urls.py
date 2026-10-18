@@ -258,6 +258,7 @@ api_urlpatterns = [
     path('erp/weekly', erp.erp_weekly, name='erp_weekly'),
     path('erp/funnel', erp.erp_funnel, name='erp_funnel'),
     path('erp/find', erp.erp_find, name='erp_find'),
+    path('erp/find-list', erp.erp_find_list, name='erp_find_list'),
     path('erp/names', erp.erp_names, name='erp_names'),
     path('erp/names/set', erp.erp_names_set, name='erp_names_set'),
     path('shed/report', shed_report.shed_report, name='shed_report_shed_report'),
