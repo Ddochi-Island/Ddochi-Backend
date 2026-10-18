@@ -150,7 +150,10 @@ def erp_sarang_detail(client, body):
         f"""SELECT s.SARANG_ID, spi.NAME, spi.PHONE, spi.RESIDENCE_STATION, s.AGE, s.GENDER, s.MBTI, s.STAGE,
                    s.CURRENT_PROCESS, s.RECRUITMENT_TYPE, s.INFLOW_DATE, mah.REGION_CODE, mah.DISTRICT_CODE,
                    COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.SOURCE_LINK, sid.HELPER_MEMBER_IDS,
-                   h.ROUTE, h.TOOL, h.APPROVAL_STATUS, h.MATCH_SCHEDULED_AT,
+                   -- 합재양 전 shed 유입은 도구노방 · 사쉐 (찾기 분석과 같은 규칙)
+                   COALESCE(h.ROUTE, CASE WHEN h.SARANG_ID IS NULL AND sid.SOURCE_LINK IS NOT NULL THEN '도구노방' END) AS ROUTE,
+                   COALESCE(h.TOOL, CASE WHEN h.SARANG_ID IS NULL AND sid.SOURCE_LINK IS NOT NULL THEN '사쉐' END) AS TOOL,
+                   h.APPROVAL_STATUS, h.MATCH_SCHEDULED_AT,
                    gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME
               FROM SARANG s
               JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
