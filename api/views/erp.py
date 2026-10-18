@@ -568,19 +568,17 @@ def erp_names_set(client, body):
 @_admin_view
 def erp_find_list(client, body):
     """shed로 들어와 아직 찾기 단계(STAGE '유입')인 사람 — 이관받은 날(SARANG 생성 시각, KST) 기준 기간 안.
-    섭외자·인도자·유입자·조력자·소속·찾기장소. 티엠 이후로 넘어간 사람은 빠짐(사용자 결정 10/19)."""
+    섭외자·유입자·조력자·소속·찾기장소. 티엠 이후로 넘어간 사람은 빠짐(사용자 결정 10/19)."""
     frm, to = _dates(body)
     rows = _q(client, f"""
         SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.CREATED_AT AS ACCEPTED_AT, sid.APPLIED_AT, sid.LOCATION, sid.HELPER_MEMBER_IDS,
-               COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, gm.NAME AS GUIDE_NAME, mah.REGION_CODE, mah.DISTRICT_CODE
+               COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, mah.REGION_CODE, mah.DISTRICT_CODE
           FROM SARANG s
           JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
           JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID AND sid.SOURCE_LINK IS NOT NULL
           JOIN MEMBERS m ON m.MEMBER_ID = s.INFLOW_MEMBER_ID
           {_INTRO_MAH}
           LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
-          LEFT JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = s.SARANG_ID AND h.IS_ACTIVE = 1
-          LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = h.GUIDE_MEMBER_ID
          WHERE s.DELETED_AT IS NULL AND s.STAGE = '유입' AND {_in_range('s.CREATED_AT')}
          ORDER BY s.CREATED_AT""", [frm.isoformat(), to.isoformat()], fetch_limit=5000)
     from api.views.assets import _helper_names_resolver
