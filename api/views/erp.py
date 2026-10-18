@@ -567,10 +567,10 @@ def erp_names_set(client, body):
 
 @_admin_view
 def erp_find_list(client, body):
-    """shed로 들어온 사람 — 이관받은 날(SARANG 생성 시각, KST) 기준 기간 안. 섭외자·인도자·유입자·소속·찾기장소·단계."""
+    """shed로 들어온 사람 — 이관받은 날(SARANG 생성 시각, KST) 기준 기간 안. 섭외자·인도자·유입자·조력자·소속·찾기장소·단계."""
     frm, to = _dates(body)
     rows = _q(client, f"""
-        SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.CREATED_AT AS ACCEPTED_AT, sid.APPLIED_AT, sid.LOCATION,
+        SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.CREATED_AT AS ACCEPTED_AT, sid.APPLIED_AT, sid.LOCATION, sid.HELPER_MEMBER_IDS,
                COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, gm.NAME AS GUIDE_NAME, mah.REGION_CODE, mah.DISTRICT_CODE
           FROM SARANG s
           JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
@@ -582,6 +582,10 @@ def erp_find_list(client, body):
           LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = h.GUIDE_MEMBER_ID
          WHERE s.DELETED_AT IS NULL AND {_in_range('s.CREATED_AT')}
          ORDER BY s.CREATED_AT""", [frm.isoformat(), to.isoformat()], fetch_limit=5000)
+    from api.views.assets import _helper_names_resolver
+    helper_names = _helper_names_resolver(client, rows)  # 조력자 ID 목록 → 이름 (한 번에 조회)
+    for r in rows:
+        r['helper_names'] = helper_names(r.pop('helper_member_ids'))
     return {'rows': rows}
 
 
