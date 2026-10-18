@@ -149,7 +149,7 @@ def erp_sarang_detail(client, body):
     info = client.query_one(
         f"""SELECT s.SARANG_ID, spi.NAME, spi.PHONE, spi.RESIDENCE_STATION, s.AGE, s.GENDER, s.MBTI, s.STAGE,
                    s.CURRENT_PROCESS, s.RECRUITMENT_TYPE, s.INFLOW_DATE, mah.REGION_CODE, mah.DISTRICT_CODE,
-                   COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.SOURCE_LINK,
+                   COALESCE(im.NAME, m.NAME) AS INTRODUCER_NAME, sid.REACTION, sid.LOCATION, sid.ENV, sid.SOURCE_LINK, sid.HELPER_MEMBER_IDS,
                    h.ROUTE, h.TOOL, h.APPROVAL_STATUS, h.MATCH_SCHEDULED_AT,
                    gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME, COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME
               FROM SARANG s
@@ -195,6 +195,9 @@ def erp_sarang_detail(client, body):
            for r in matches]
     )
     timeline.sort(key=lambda x: x['at'] or '', reverse=True)
+    # 조력자 — shed 이관 때 같이 저장된 MEMBER_ID 목록(콤마 구분) → 이름
+    from api.views.assets import _helper_names_resolver
+    info['helper_names'] = _helper_names_resolver(client, [info])(info.get('helper_member_ids'))
     return {'info': info, 'timeline': timeline}
 
 
