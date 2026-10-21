@@ -588,6 +588,27 @@ def erp_find_list(client, body):
     return {'rows': rows}
 
 
+# ── 텔레그램 다시 올리기(관리자) ──────────────────────────────
+
+@_admin_view
+def erp_telegram_refresh(client, body):
+    """DB에서 이미 재가/반려된 건의 텔레그램 카드·현황판만 다시 올림(처리는 다시 안 함).
+    텔레그램 갱신이 실패했던 건(봇이 방에 못 닿던 경우 등)을 맞출 때."""
+    from api.views.assets import refresh_telegram_after_approval
+    ids = [str(x).strip() for x in (body.get('sarangIds') or []) if str(x).strip()][:50]
+    if not ids:
+        raise ValueError('sarangIds가 비었어')
+    done = []
+    for sid in ids:
+        hj = client.query_one(
+            "SELECT APPROVAL_STATUS FROM SARANG_HAB_JAE_YANG WHERE SARANG_ID = :1 AND IS_ACTIVE = 1", [sid])
+        if not hj:
+            continue
+        refresh_telegram_after_approval(client, sid, hj['approval_status'] == 'approved')
+        done.append(sid)
+    return {'refreshed': done}
+
+
 if __name__ == '__main__':  # 이름 묶기 확인: python -m api.views.erp
     for raw, want in [('범계역', '범계'), ('범계 로데오', '범계'), ('신촌역사내', '신촌'), ('성대 수원', '성균관대'), ('한대앞역', '한양대'),
                       ('연성대학교 앞', '연성대'), ('가천대학교', '가천대'), ('혜화역 4출', '혜화'), ('성대후문', '성균관대'), ('', '(미기록)'), ('한양대에리카', '한양대에리카')]:

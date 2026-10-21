@@ -986,28 +986,34 @@ def update_approval(request, *args, **kwargs):
     if result.get('blocked'):
         return JsonResponse({'success': False, 'message': '답장과 창개설을 먼저 완료해야 재가할 수 있어요'}, status=400)
 
+    refresh_telegram_after_approval(client, sarang_id, enum_val == 'approved')
+    return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
+
+
+def refresh_telegram_after_approval(client, sarang_id, approved):
+    """재가/반려 뒤 텔레그램 갱신 — 합재양 카드 + (재가면) 매칭 현황판·일일보고 추수·shed 현황판.
+    update_approval과 ERP '텔레그램 다시 올리기'(DB는 이미 처리된 건)가 공유. 실패해도 다음 것은 계속."""
+    log = logging.getLogger('api.views.assets')
     try:
         send_habjaeyang_to_telegram(client, sarang_id)
     except Exception:
-        logging.getLogger('api.views.assets').warning('[update_approval] telegram refresh failed', exc_info=True)
-
-    if enum_val == 'approved':
+        log.warning('[approval] telegram refresh failed', exc_info=True)
+    if not approved:
+        return
+    try:
+        refresh_matching_dashboard_for_sarang(client, sarang_id)
+    except Exception:
+        log.warning('[approval] matching dashboard refresh failed', exc_info=True)
+    try:
+        refresh_team_stats_for_sarang(client, sarang_id)
+    except Exception:
+        log.warning('[approval] team stats refresh failed', exc_info=True)
+    for group in shed_groups_for_sarang(client, sarang_id):
         try:
-            refresh_matching_dashboard_for_sarang(client, sarang_id)
+            refresh_shed_unified(client, group)
+            refresh_shed_tm(client, group)
         except Exception:
-            logging.getLogger('api.views.assets').warning('[update_approval] matching dashboard refresh failed', exc_info=True)
-        try:
-            refresh_team_stats_for_sarang(client, sarang_id)
-        except Exception:
-            logging.getLogger('api.views.assets').warning('[update_approval] team stats refresh failed', exc_info=True)
-        for group in shed_groups_for_sarang(client, sarang_id):
-            try:
-                refresh_shed_unified(client, group)
-                refresh_shed_tm(client, group)
-            except Exception:
-                logging.getLogger('api.views.assets').warning('[update_approval] shed dashboard refresh failed', exc_info=True)
-
-    return JsonResponse({'success': True, 'message': f'{status_ko} 처리 완료!'})
+            log.warning('[approval] shed dashboard refresh failed', exc_info=True)
 
 
 # 매칭 결과 → SARANG.STAGE 진행. 실제로 만난 결과(비합/탈락/2차만남)는 '매칭', 상담따기는 '상따'.
