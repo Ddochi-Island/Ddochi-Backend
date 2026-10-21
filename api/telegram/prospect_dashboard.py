@@ -37,7 +37,10 @@ def _fetch_rows(client, team_id):
               AND s.STAGE IN ('합재양', '재가')
               AND hj.APPROVAL_STATUS != 'rejected'
               AND s.DELETED_AT IS NULL
-              AND s.INFLOW_DATE > SYSDATE - 30
+              -- 최근 30일 기준 = 만남 픽스한 날(마지막 만남 픽스 통화). 기록이 없으면(합재양에서 바로 등록 등) 합재양 작성일.
+              -- 예전엔 찾은 날 기준이라 오래전에 찾고 최근에 만픽한 건이 빠졌음(2026-10-21 사용자 결정)
+              AND COALESCE((SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'),
+                           hj.CREATED_AT) > SYSTIMESTAMP - INTERVAL '30' DAY
             ORDER BY hj.MATCH_SCHEDULED_AT NULLS LAST, s.UPDATED_AT DESC
             FETCH FIRST 200 ROWS ONLY""",
         [team_id],
