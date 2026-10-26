@@ -14,7 +14,8 @@ def _compute_hmac(secret, action, args, ts, chat_id):
     return base64.urlsafe_b64encode(digest).decode()[:11]
 
 
-def sign_callback_data(secret, action, args, chat_id):
-    ts = int(time.time() * 1000)
+def sign_callback_data(secret, action, args, chat_id, ts=None):
+    # ts: 검증 쪽은 |now-ts| <= 7일만 봄 — 미래 시각을 넣으면 그만큼 늦게까지 눌림(합재양 카드가 만남 예정일 기준으로 씀)
+    ts = int(time.time() * 1000) if ts is None else ts
     mac = _compute_hmac(secret, action, args, ts, chat_id)
     return f'{action}{SEPARATOR}{args}{SEPARATOR}{ts}{SEPARATOR}{mac}'

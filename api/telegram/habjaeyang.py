@@ -22,15 +22,33 @@ HJ_SHORT = {'reply': 'r', 'window': 'w', 'approve': 'a', 'noop': 'n'}
 HJ_REJECT_REASONS = ['매칭취소', '환경반려', '인성반려', '중섭반려', '답장안옴', '잘못올림']
 
 
-def _hj_cb(secret, chat_id, sarang_id, code):
+_WEEK_MS = 7 * 24 * 3600_000
+_KST = datetime.timezone(datetime.timedelta(hours=9))
+
+
+def _hj_sign_ts(match_scheduled_at, now_ms=None):
+    """버튼 서명 시각 — 만남 예정일(KST 그날 끝)로 당겨 넣어 '만남 예정일 + 7일'까지 눌리게.
+    tel_router가 |now-ts| <= 7일만 허용하므로 지금~지금+7일 사이로 자름 → 최대 카드 그린 날 + 14일."""
+    now_ms = int(datetime.datetime.now().timestamp() * 1000) if now_ms is None else now_ms
+    try:
+        day = datetime.date.fromisoformat(str(match_scheduled_at or '')[:10])
+    except ValueError:
+        return now_ms
+    end = datetime.datetime.combine(day, datetime.time(23, 59, 59), _KST)
+    return max(now_ms, min(int(end.timestamp() * 1000), now_ms + _WEEK_MS))
+
+
+def _hj_cb(secret, chat_id, sarang_id, code, ts=None):
     if secret and chat_id is not None:
-        return sign_callback_data(secret, 'hj', f'{sarang_id}.{code}', chat_id)
+        return sign_callback_data(secret, 'hj', f'{sarang_id}.{code}', chat_id, ts)
     return f'hj|{sarang_id}|{code}'
 
 
-def build_hj_keyboard(sarang_id, secret, chat_id, replied, window_opened, approval_status):
+def build_hj_keyboard(sarang_id, secret, chat_id, replied, window_opened, approval_status, match_scheduled_at=None):
+    ts = _hj_sign_ts(match_scheduled_at)
+
     def cb(code):
-        return _hj_cb(secret, chat_id, sarang_id, code)
+        return _hj_cb(secret, chat_id, sarang_id, code, ts)
 
     rows = [[
         {'text': '✅ 답장 💬' if replied else '💬 답장', 'callback_data': cb(HJ_SHORT['reply'])},
@@ -180,6 +198,7 @@ def send_habjaeyang_to_telegram(client, sarang_id, refresh_dashboard=True):
     keyboard = build_hj_keyboard(
         sarang_id, settings.TG_CALLBACK_HMAC_SECRET, chat_id,
         row['has_replied'] == '1', row['is_window_opened'] == '1', row['approval_status'] or '',
+        row['match_scheduled_at'],
     )
 
     outcome = None
@@ -235,6 +254,7 @@ def refresh_hj_markup(client, sarang_id, chat_id, message_id):
     keyboard = build_hj_keyboard(
         sarang_id, settings.TG_CALLBACK_HMAC_SECRET, chat_id,
         row['has_replied'] == '1', row['is_window_opened'] == '1', row['approval_status'] or '',
+        row['match_scheduled_at'],
     )
     try:
         tel_router_client.enqueue(
@@ -258,3 +278,14 @@ def refresh_hj_reason_markup(client, sarang_id, chat_id, message_id):
         )
     except Exception:
         logger.warning('[habjaeyang] editMessageReplyMarkup(reason) failed', exc_info=True)
+
+
+if __name__ == '__main__':
+    # 만남 예정일 기준 서명 시각 자체 점검
+    now = int(datetime.datetime(2026, 10, 16, 18, 43, tzinfo=_KST).timestamp() * 1000)
+    assert _hj_sign_ts(None, now) == now                     # 예정일 없음 → 지금(7일)
+    assert _hj_sign_ts('2026-10-01T10:00:00', now) == now    # 지난 만남 → 지금
+    end20 = int(datetime.datetime(2026, 10, 20, 23, 59, 59, tzinfo=_KST).timestamp() * 1000)
+    assert _hj_sign_ts('2026-10-20T14:00:00', now) == end20  # 10/20 만남 → 10/27 밤까지
+    assert _hj_sign_ts('2026-12-01', now) == now + _WEEK_MS  # 먼 만남 → 최대 14일
+    print('ok')
