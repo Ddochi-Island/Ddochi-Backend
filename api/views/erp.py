@@ -588,6 +588,68 @@ def erp_find_list(client, body):
     return {'rows': rows}
 
 
+# ── 매칭 명단(관리자) ──────────────────────────────
+
+def _match_summary(matches, scheduled_at):
+    """한 사람의 매칭 이력(MATCH_DEGREE·ATTEMPT_COUNT·MATCHED_AT·RESULT 라벨) → 시트 열.
+    최초만남 = 1차의 마지막 시도(밀림이면 다음 시도로 넘어감), 이후만남 = 가장 높은 차수(2차 이상)의 마지막 시도.
+    매칭 이력이 아직 없으면 합재양의 만남 예정일."""
+    def last(rows):
+        return max(rows, key=lambda r: int(r['attempt_count'] or 0)) if rows else None
+    first = last([r for r in matches if int(r['match_degree'] or 0) == 1])
+    top = max((int(r['match_degree'] or 0) for r in matches), default=0)
+    later = last([r for r in matches if int(r['match_degree'] or 0) == top]) if top > 1 else None
+    consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
+    return {
+        'first_at': (first or {}).get('matched_at') or scheduled_at,
+        'first_result': (first or {}).get('result_label') or '',
+        'later_result': (later or {}).get('result_label') or ('진행 예정' if later else ''),
+        'consult_at': min(consult) if consult else None,
+    }
+
+
+@_admin_view
+def erp_match_list(client, body):
+    """합재양을 쓴 사람 — 만남 픽스 날(없으면 합재양 작성일, KST) 기준 기간 안. 구 매칭 시트처럼
+    인도·교사 소속(지역/반/구역), 섭외자·인도자·교사, 경로·도구·온오프, 최초/이후 만남 결과, 상담연결 날."""
+    frm, to = _dates(body)
+    fix_at = """COALESCE((SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'), h.CREATED_AT)"""
+    rows = _q(client, f"""
+        SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.RECRUITMENT_TYPE, {fix_at} AS FIX_AT,
+               h.ROUTE, h.TOOL, h.MATCH_SCHEDULED_AT,
+               gm.NAME AS GUIDE_NAME, gmah.REGION_CODE AS GUIDE_REGION, gmah.DISTRICT_CODE AS GUIDE_DISTRICT,
+               COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, tmah.REGION_CODE AS TEACHER_REGION, tmah.DISTRICT_CODE AS TEACHER_DISTRICT
+          FROM SARANG s
+          JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+          JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = s.SARANG_ID AND h.IS_ACTIVE = 1
+          LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = h.GUIDE_MEMBER_ID
+          LEFT JOIN MEMBER_AFFILIATION_HISTORIES gmah ON gmah.MEMBER_ID = h.GUIDE_MEMBER_ID AND gmah.IS_CURRENT = 1
+          LEFT JOIN MEMBERS tm ON tm.MEMBER_ID = h.TEACHER_MEMBER_ID
+          LEFT JOIN MEMBER_AFFILIATION_HISTORIES tmah ON tmah.MEMBER_ID = h.TEACHER_MEMBER_ID AND tmah.IS_CURRENT = 1
+         WHERE s.DELETED_AT IS NULL AND {_in_range(fix_at)}
+         ORDER BY FIX_AT""", [frm.isoformat(), to.isoformat()], fetch_limit=5000)
+    matches = {}
+    ids = [r['sarang_id'] for r in rows]
+    for i in range(0, len(ids), 500):  # IN 목록 1000개 한도
+        chunk = ids[i:i + 500]
+        for m in client.query(
+            f"""SELECT mh.SARANG_ID, mh.MATCH_DEGREE, mh.ATTEMPT_COUNT, mh.MATCHED_AT, mh.RESULT, mrc.LABEL AS RESULT_LABEL
+                  FROM SARANG_MATCH_HISTORIES mh LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = mh.RESULT
+                 WHERE mh.SARANG_ID IN ({', '.join(f':{j + 1}' for j in range(len(chunk)))})""",
+                chunk, fetch_limit=50000):
+            matches.setdefault(m['sarang_id'], []).append(m)
+    # 반 = 같은 지역 구역 3~4개 묶음(DISTRICT_GROUPS.DISTRICT_CODES '3,4,5')
+    groups = {}
+    for g in client.query("SELECT REGION_CODE, GROUP_NAME, DISTRICT_CODES FROM DISTRICT_GROUPS WHERE DELETED_AT IS NULL"):
+        for d in (g['district_codes'] or '').split(','):
+            groups[(g['region_code'], d.strip())] = g['group_name']
+    for r in rows:
+        r.update(_match_summary(matches.get(r['sarang_id'], []), r.pop('match_scheduled_at')))
+        r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
+        r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
+    return {'rows': rows}
+
+
 # ── 텔레그램 다시 올리기(관리자) ──────────────────────────────
 
 @_admin_view
@@ -613,4 +675,9 @@ if __name__ == '__main__':  # 이름 묶기 확인: python -m api.views.erp
     for raw, want in [('범계역', '범계'), ('범계 로데오', '범계'), ('신촌역사내', '신촌'), ('성대 수원', '성균관대'), ('한대앞역', '한양대'),
                       ('연성대학교 앞', '연성대'), ('가천대학교', '가천대'), ('혜화역 4출', '혜화'), ('성대후문', '성균관대'), ('', '(미기록)'), ('한양대에리카', '한양대에리카')]:
         assert _norm_place(raw) == want, (raw, _norm_place(raw), want)
+    m = lambda d, a, at, res, lab: {'match_degree': str(d), 'attempt_count': str(a), 'matched_at': at, 'result': res, 'result_label': lab}
+    assert _match_summary([], '2026-10-20T14:00') == {'first_at': '2026-10-20T14:00', 'first_result': '', 'later_result': '', 'consult_at': None}
+    hist = [m(1, 1, '10-01', 'DELAY', '밀림'), m(1, 2, '10-03', 'SECOND_MEET', '2차만남'), m(2, 1, '10-07', 'CONSULT_WIN', '상담연결')]
+    assert _match_summary(hist, None) == {'first_at': '10-03', 'first_result': '2차만남', 'later_result': '상담연결', 'consult_at': '10-07'}
+    assert _match_summary([m(1, 1, '10-01', 'SECOND_MEET', '2차만남'), m(2, 1, None, None, None)], None)['later_result'] == '진행 예정'
     print('ok')
