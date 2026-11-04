@@ -11,6 +11,7 @@ import config
 import pairing
 import teacher_input
 import match_result_cmd
+import presence
 import realtime
 import telegram_client
 
@@ -140,6 +141,18 @@ async def notify_endpoint(request: Request, x_enqueue_secret: str = Header(defau
     body = await request.json()
     sent = await realtime.broadcast({'topic': str(body.get('topic') or 'hapdang'), 'by': body.get('by')})
     return {'ok': True, 'clients': sent}
+
+
+@app.post('/calls')
+async def calls_endpoint(request: Request, x_enqueue_secret: str = Header(default='')):
+    # 합당한 자 통화 중·접속자 상태 — Django만 부름(공개 경로라 시크릿 필수)
+    if not config.ENQUEUE_SECRET or x_enqueue_secret != config.ENQUEUE_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    b = await request.json()
+    try:
+        return {'ok': True, **presence.handle(b.get('op'), b.get('sabun'), b.get('name'), b.get('prospectId'), b.get('callingProspectId'))}
+    except ValueError:
+        raise HTTPException(status_code=400, detail='bad op')
 
 
 @app.post('/enqueue')

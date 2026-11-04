@@ -5,10 +5,10 @@ import json
 import logging
 import random
 import re
-import time
 import uuid
 from zoneinfo import ZoneInfo
 
+import requests
 from django.conf import settings
 from django.http import JsonResponse
 from django.utils import timezone
@@ -112,12 +112,13 @@ def _member_id_by_name(client, name):
     return row['member_id'] if row else None
 
 
-# Shed 통화/접속 상태 — 원본처럼 DB 없이 프로세스 메모리 dict. 원본과 동일한 제약:
-# 단일 프로세스 전제(멀티 워커면 워커별로 안 나뉨) — 새로운 제약 아님.
-shed_call_state = {}
-shed_presence_state = {}
-_CALL_TTL_S = 60
-_PRESENCE_TTL_S = 12
+# Shed 통화 중·접속자 상태는 tel_router(한 프로세스)가 들고 있음 — 여기(gunicorn 2워커)에 메모리로 두면 워커별로 갈라져서
+# 표시가 깜빡였음(2026-11-05 옮김). 상태 규칙(60초/12초 만료)은 tel_router_py/presence.py.
+def _tel_calls(op, **kw):
+    resp = requests.post(f"{settings.TEL_ROUTER_URL.rstrip('/')}/calls", json={'op': op, **kw},
+                         headers={'X-Enqueue-Secret': settings.TEL_ROUTER_ENQUEUE_SECRET}, timeout=5)
+    resp.raise_for_status()
+    return resp.json()
 
 
 _APPROVAL_KO = {'pending': '대기', 'approved': '재가', 'rejected': '반려'}
@@ -1287,25 +1288,14 @@ def habjaeyang_dup_resolve(request, *args, **kwargs):
 def shed_call_status(request, *args, **kwargs):
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    now = time.time()
     body = _json_body(request)
     calling_pid = str((body.get('data') or {}).get('callingProspectId') or '').strip().upper()
-    if calling_pid and calling_pid in shed_call_state:
-        shed_call_state[calling_pid]['lastHeartbeat'] = now
-    for pid in list(shed_call_state.keys()):
-        entry = shed_call_state[pid]
-        hb = entry.get('lastHeartbeat') or entry.get('startedAt') or 0
-        if now - hb > _CALL_TTL_S:
-            del shed_call_state[pid]
-
-    sabun = request.user.get('sabun')
-    if sabun:
-        shed_presence_state[sabun] = {'name': request.user.get('name'), 'lastHeartbeat': now}
-    for s in list(shed_presence_state.keys()):
-        if now - shed_presence_state[s]['lastHeartbeat'] > _PRESENCE_TTL_S:
-            del shed_presence_state[s]
-
-    return JsonResponse({'success': True, 'calls': shed_call_state, 'presence': shed_presence_state})
+    try:
+        r = _tel_calls('status', sabun=request.user.get('sabun'), name=request.user.get('name'), callingProspectId=calling_pid or None)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[shed_call_status] tel_router failed', exc_info=True)
+        return JsonResponse({'success': False, 'message': '통화 상태를 못 불러왔어'}, status=502)
+    return JsonResponse({'success': True, 'calls': r['calls'], 'presence': r['presence']})
 
 
 @csrf_exempt
@@ -1313,7 +1303,10 @@ def shed_call_status(request, *args, **kwargs):
 def shed_presence_leave(request, *args, **kwargs):
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
-    shed_presence_state.pop(request.user.get('sabun'), None)
+    try:
+        _tel_calls('leave', sabun=request.user.get('sabun'))
+    except Exception:
+        pass  # 못 지워도 12초 뒤 자동으로 빠짐
     return JsonResponse({'success': True})
 
 
@@ -1327,9 +1320,11 @@ def shed_call_start(request, *args, **kwargs):
     if not prospect_id:
         return JsonResponse({'success': False, 'message': 'prospectId 필요'}, status=400)
     ctx = get_author_context(request.user['sabun'])
-    shed_call_state[prospect_id] = {
-        'callerName': ctx['name'], 'callerSabun': ctx['sabun'], 'startedAt': time.time(),
-    }
+    try:
+        _tel_calls('start', sabun=ctx['sabun'], name=ctx['name'], prospectId=prospect_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[shed_call_start] tel_router failed', exc_info=True)
+        return JsonResponse({'success': False, 'message': '통화 시작 표시를 못 남겼어. 다시 눌러줘'}, status=502)
     return JsonResponse({'success': True})
 
 
@@ -1340,7 +1335,10 @@ def shed_call_end(request, *args, **kwargs):
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     body = _json_body(request)
     prospect_id = str((body.get('data') or {}).get('prospectId') or '').strip().upper()
-    shed_call_state.pop(prospect_id, None)
+    try:
+        _tel_calls('end', prospectId=prospect_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[shed_call_end] tel_router failed', exc_info=True)  # 60초 뒤 자동 해제
     return JsonResponse({'success': True})
 
 
