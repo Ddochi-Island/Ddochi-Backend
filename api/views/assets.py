@@ -1503,7 +1503,7 @@ def shed_register(request, *args, **kwargs):
                     (SARANG_ID, PERSONAL_INFO_ID, INFLOW_MEMBER_ID, AGE, MBTI, STAGE,
                      RECRUITMENT_TYPE, INFLOW_DATE, CREATED_BY, UPDATED_BY)
                   VALUES (:1, :2, :3, :4, :5, '유입', 'OFFLINE', SYSTIMESTAMP, :6, :6)""",
-        'args': [sarang_id, personal_info_id, sabun, intake['age'], intake['mbti'], sabun],
+        'args': [sarang_id, personal_info_id, sabun, intake['age'], _shed_mbti(intake['mbti'], intake['rest_type']), sabun],
     })
     # TM_RESERVED_AT은 TIMESTAMP 컬럼 — go-ora로 조회한 문자열을 그대로 다시 바인딩하면
     # ORA-01843(not a valid month)이 나서, DB 안에서 직접 복사(INSERT ... SELECT)함.
@@ -1983,6 +1983,18 @@ def _intake_people(client, body):
 _shed_log = logging.getLogger('api.views.assets')
 
 
+_MBTI_RE = re.compile(r'^[EI][NS][TF][JP]$')
+
+
+def _shed_mbti(mbti, rest):
+    """shed 신청서는 MBTI를 'rest'(예전 휴식 유형 칸) 키로 보냄 → mbti가 없으면 rest가 MBTI 모양일 때 그걸 씀."""
+    for v in (mbti, rest):
+        v = str(v or '').strip().upper()
+        if _MBTI_RE.match(v):
+            return v
+    return None
+
+
 def _shed_applied_at(v):
     """shed 신청 시각(시트 A열, GAS가 ISO로 보냄) → UTC 'YYYY-MM-DD HH:MM:SS'. 시간대 없으면 KST로 봄. 못 읽으면 None."""
     v = str(v or '').strip()
@@ -2078,7 +2090,7 @@ def _shed_webhook(request):
     tm_datetime = _shed_tm_datetime(body.get('tmDatetime'))
     rest_type = str(body.get('rest') or '').strip() or None
     applied_at = _shed_applied_at(body.get('appliedAt'))  # shed 신청 시각 — 합당한자 전 지역 공개 기준
-    mbti = str(body.get('mbti') or '').strip() or None
+    mbti = _shed_mbti(body.get('mbti'), rest_type)
 
     if not name or len(phone_normalized) < 10:
         _shed_log.warning('[shed_webhook] 400 name=%r phone_digits=%d', name, len(phone_normalized))
@@ -2205,3 +2217,11 @@ def shed_pending_revive(request, *args, **kwargs):
         return JsonResponse({'success': False, 'message': '반려 상태인 건을 찾을 수 없어요'}, status=400)
     return JsonResponse({'success': True})
 
+
+if __name__ == '__main__':  # python -m api.views.assets — shed MBTI 자체 점검
+    assert _shed_mbti(None, 'ISTP') == 'ISTP'
+    assert _shed_mbti('', 'enfj') == 'ENFJ'
+    assert _shed_mbti('INFP', 'ISTP') == 'INFP'
+    assert _shed_mbti(None, '낮잠') is None
+    assert _shed_mbti(None, None) is None
+    print('ok')
