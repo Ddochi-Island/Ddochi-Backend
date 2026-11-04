@@ -99,6 +99,7 @@ api_urlpatterns = [
     path('shed-call-start', assets.shed_call_start, name='assets_shed_call_start'),
     path('shed-call-end', assets.shed_call_end, name='assets_shed_call_end'),
     path('shed-note-save', assets.shed_note_save, name='assets_shed_note_save'),
+    path('shed/memo', assets.shed_memo, name='assets_shed_memo'),
     path('get-tm-script', assets.get_tm_script, name='assets_get_tm_script'),
     path('save-tm-script', assets.save_tm_script, name='assets_save_tm_script'),
     path('shed-register', assets.shed_register, name='assets_shed_register'),

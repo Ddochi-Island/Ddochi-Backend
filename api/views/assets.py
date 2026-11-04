@@ -1352,6 +1352,74 @@ def shed_note_save(request, *args, **kwargs):
     return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
 
 
+def _can_manage_memos(client, sabun):
+    """남의 메모도 고치고 지울 수 있나 — 전역·지역 직책과 지역장. 전도팀장 이하는 자기 것만(2026-11-04 사용자 결정)."""
+    return bool(client.query_one(
+        """SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS mpm JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
+            WHERE mpm.MEMBER_ID = :1 AND (pc.SCOPE IN ('global', 'region') OR pc.POSITION_CODE = 'team_lead')""",
+        [sabun],
+    ))
+
+
+def _memo_rows(client, sarang_id=None):
+    where, args = ('AND mo.SARANG_ID = :1', [sarang_id]) if sarang_id else ('', [])
+    return client.query(
+        f"""SELECT mo.MEMO_ID, mo.SARANG_ID, mo.AUTHOR_MEMBER_ID, m.NAME AS AUTHOR_NAME, mo.CONTENT, mo.CREATED_AT, mo.UPDATED_AT
+              FROM SARANG_TM_MEMOS mo JOIN MEMBERS m ON m.MEMBER_ID = mo.AUTHOR_MEMBER_ID
+             WHERE mo.DELETED_AT IS NULL {where}
+             ORDER BY mo.CREATED_AT""",
+        args, fetch_limit=50000,
+    )
+
+
+def _memo_json(r):
+    return {'id': r['memo_id'], 'authorId': r['author_member_id'], 'authorName': r['author_name'],
+            'content': r['content'], 'createdAt': r['created_at'], 'updatedAt': r['updated_at']}
+
+
+@csrf_exempt
+@require_jwt
+def shed_memo(request, *args, **kwargs):
+    """합당한자 통화 메모(댓글) — action: add / edit / delete. 응답에 그 사람의 메모 전체를 다시 실어줌."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    body = _json_body(request)
+    sabun = request.user['sabun']
+    action = body.get('action')
+    sarang_id = str(body.get('sarangId') or '').strip().upper()
+    content = str(body.get('content') or '').strip()
+    client = DataRouterClient()
+
+    if action == 'add':
+        if not sarang_id or not content:
+            return JsonResponse({'success': False, 'message': '메모 내용을 써줘'}, status=400)
+        client.exec(
+            "INSERT INTO SARANG_TM_MEMOS (MEMO_ID, SARANG_ID, AUTHOR_MEMBER_ID, CONTENT) VALUES (:1, :2, :3, :4)",
+            [uuid.uuid4().hex.upper(), sarang_id, sabun, _trunc_chars(content, 2000)],
+        )
+    elif action in ('edit', 'delete'):
+        memo = client.query_one(
+            "SELECT SARANG_ID, AUTHOR_MEMBER_ID FROM SARANG_TM_MEMOS WHERE MEMO_ID = :1 AND DELETED_AT IS NULL",
+            [str(body.get('memoId') or '')],
+        )
+        if not memo:
+            return JsonResponse({'success': False, 'message': '없는 메모야'}, status=404)
+        if memo['author_member_id'] != sabun and not _can_manage_memos(client, sabun):
+            return JsonResponse({'success': False, 'message': '내가 쓴 메모만 고칠 수 있어'}, status=403)
+        sarang_id = memo['sarang_id']
+        if action == 'edit':
+            if not content:
+                return JsonResponse({'success': False, 'message': '메모 내용을 써줘'}, status=400)
+            client.exec("UPDATE SARANG_TM_MEMOS SET CONTENT = :1, UPDATED_AT = SYSTIMESTAMP WHERE MEMO_ID = :2",
+                        [_trunc_chars(content, 2000), body['memoId']])
+        else:
+            client.exec("UPDATE SARANG_TM_MEMOS SET DELETED_AT = SYSTIMESTAMP WHERE MEMO_ID = :1", [body['memoId']])
+    else:
+        return JsonResponse({'success': False, 'message': 'action은 add/edit/delete'}, status=400)
+
+    return JsonResponse({'success': True, 'memos': [_memo_json(r) for r in _memo_rows(client, sarang_id)]})
+
+
 @csrf_exempt
 @require_jwt
 def get_tm_script(request, *args, **kwargs):
@@ -1640,6 +1708,11 @@ def get_shed_prospects(request, *args, **kwargs):
         if r['result'] == 'NO_ANSWER':
             no_answer_count_by_id[r['sarang_id']] = no_answer_count_by_id.get(r['sarang_id'], 0) + 1
 
+    memos_by_id = {}
+    for m in _memo_rows(client):
+        memos_by_id.setdefault(m['sarang_id'], []).append(_memo_json(m))
+    can_manage_memos = _can_manage_memos(client, request.user['sabun'])
+
     list_ = []
     for r in rows:
         latest_call = latest_call_by_id.get(r['sarang_id'])
@@ -1677,9 +1750,10 @@ def get_shed_prospects(request, *args, **kwargs):
                 'teacherName': r['teacher_name'],
             } if r['hab_jae_yang_id'] else None,
             'timeline': timeline_by_id.get(r['sarang_id'], []),
+            'memos': memos_by_id.get(r['sarang_id'], []),
         })
 
-    return JsonResponse({'success': True, 'list': list_})
+    return JsonResponse({'success': True, 'list': list_, 'canManageMemos': can_manage_memos})
 
 
 # 합당한자 전체 공개 기준 — 프론트(SunhanYanghagiScreen openToAll)와 같은 숫자. 합당한자 시작(10/8) 이후 받은 건만 해당
