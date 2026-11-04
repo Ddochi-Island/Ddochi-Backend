@@ -4,13 +4,14 @@ import asyncio
 import logging
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 import callback
 import config
 import pairing
 import teacher_input
 import match_result_cmd
+import realtime
 import telegram_client
 
 logging.basicConfig(level=logging.INFO)
@@ -107,6 +108,38 @@ async def webhook(request: Request, x_telegram_bot_api_secret_token: str = Heade
 
     # /pair, 인라인 버튼 외 명령(공유 리드 배정/삭제/복구 등)은 최소 버전 범위 밖.
     return {'ok': True}
+
+
+@app.websocket('/ws/hapdang')
+async def ws_hapdang(ws: WebSocket):
+    # 토큰은 URL이 아니라 첫 메시지로 받음 — URL에 넣으면 접속 로그에 토큰이 그대로 남음
+    await ws.accept()
+    try:
+        token = await asyncio.wait_for(ws.receive_text(), timeout=10)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        await ws.close(code=4401)
+        return
+    if not realtime.verify_token(token):
+        await ws.close(code=4401)
+        return
+    realtime.add(ws)
+    try:
+        while True:
+            await ws.receive_text()  # 클라이언트가 보내는 건 없음 — 끊김 감지용
+    except WebSocketDisconnect:
+        pass
+    finally:
+        realtime.remove(ws)
+
+
+@app.post('/notify')
+async def notify_endpoint(request: Request, x_enqueue_secret: str = Header(default='')):
+    # 공개 경로라 /enqueue와 달리 시크릿이 없으면 무조건 거부
+    if not config.ENQUEUE_SECRET or x_enqueue_secret != config.ENQUEUE_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    body = await request.json()
+    sent = await realtime.broadcast({'topic': str(body.get('topic') or 'hapdang'), 'by': body.get('by')})
+    return {'ok': True, 'clients': sent}
 
 
 @app.post('/enqueue')

@@ -26,3 +26,6 @@ CALLBACK_HMAC_SECRET = os.getenv('TG_CALLBACK_HMAC_SECRET', '')
 # 사이 텀보다 훨씬 짧아서 며칠 지난 카드는 거의 항상 "만료된 버튼"으로 뜸
 # (2026-09-27 실사용자 신고 — 25일에 뜬 카드를 27일에 눌렀더니 만료됨). 7일로 늘림.
 CALLBACK_TS_WINDOW_MS = int(os.getenv('TG_CALLBACK_TS_WINDOW_MS', str(7 * 24 * 3600_000)))
+
+# 합당한 자 실시간 웹소켓 — Django access JWT 확인용(Django와 같은 값)
+JWT_SECRET = os.getenv('JWT_SECRET', '')

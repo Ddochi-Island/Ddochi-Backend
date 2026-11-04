@@ -63,6 +63,7 @@ services:
       MAIN_SERVER_URL: http://django:8000
       MAIN_INTERNAL_TELEGRAM_TOKEN: ${TELEGRAM_INTERNAL_TOKEN}
       TG_CALLBACK_HMAC_SECRET: ${TG_CALLBACK_HMAC_SECRET}
+      JWT_SECRET: ${JWT_SECRET}  # 합당한 자 실시간 웹소켓 토큰 확인(Django와 같은 값)
     depends_on:
       - django
 
