@@ -1761,7 +1761,7 @@ PUBLIC_AFTER_CALLS = 4
 
 
 def _was_public_in_hapdang(row):
-    """만남픽스 시점에 🌏 전체 공개였는지 — 신청일(없으면 받은 날)부터 4일 지남 또는 티엠 4회 이상(만남픽스 기록 제외)."""
+    """만남픽스 시점에 🌏 전체 공개였는지 — 신청일(없으면 받은 날)부터 4일 지남 또는 티엠 4회 이상(만남픽스·예약 티엠 기록 제외)."""
     if not row.get('received_day') or row['received_day'] < HAPDANG_START_DAY:
         return False
     days = (timezone.localdate() - datetime.date.fromisoformat(row['inflow_day'])).days if row.get('inflow_day') else 0
@@ -1794,7 +1794,7 @@ def run_shed_gacha(request, *args, **kwargs):
         """SELECT sid.INTRODUCER_MEMBER_ID, mah.REGION_CODE,
                   TO_CHAR(s.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS RECEIVED_DAY,
                   TO_CHAR(COALESCE(sid.APPLIED_AT, s.CREATED_AT) AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS INFLOW_DAY,
-                  (SELECT COUNT(*) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT <> 'MEET_FIX') AS CALLS
+                  (SELECT COUNT(*) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT NOT IN ('MEET_FIX', 'RESERVED_TM')) AS CALLS
              FROM SARANG s JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
              LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
                ON mah.MEMBER_ID = COALESCE(sid.INTRODUCER_MEMBER_ID, s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
