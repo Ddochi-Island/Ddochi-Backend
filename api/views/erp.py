@@ -608,29 +608,21 @@ def _match_summary(matches, scheduled_at):
     }
 
 
-_HAP_WINDOW_DAYS = 3
-_HAP_LOOKBACK_DAYS = 60  # 합당한자 날짜는 픽스 날보다 늦어질 수만 있어서, 기간 시작보다 이만큼 앞 픽스까지 가져와 걸러냄
-
-
-def _hap_date(fix_at, first_at):
-    """합당한자 날짜(YYYY-MM-DD) — 만남 픽스 날(KST). 최초 만남이 픽스 날로부터 3일 넘게 뒤면 최초 만남 3일 전
-    (2026-11-05 사용자 결정). 만남 날짜는 입력한 벽시계 값이라 앞 10자리 그대로."""
-    fix_day = (datetime.datetime.fromisoformat(fix_at.replace('Z', '+00:00')) + datetime.timedelta(hours=9)).date()
-    if first_at:
-        first_day = datetime.date.fromisoformat(first_at[:10])
-        if (first_day - fix_day).days > _HAP_WINDOW_DAYS:
-            return (first_day - datetime.timedelta(days=_HAP_WINDOW_DAYS)).isoformat()
-    return fix_day.isoformat()
+def _hap_date(hap_at):
+    """합당한자 날짜(YYYY-MM-DD) — 재가한 날(KST, 2026-11-11 사용자 결정. 전엔 만남 픽스 날 + 3일 규칙)."""
+    return (datetime.datetime.fromisoformat(hap_at.replace('Z', '+00:00')) + datetime.timedelta(hours=9)).date().isoformat()
 
 
 @_admin_view
 def erp_match_list(client, body):
-    """합재양을 쓴 사람 — 합당한자 날짜(_hap_date: 만남 픽스 날, 최초 만남이 3일 넘게 뒤면 그 3일 전) 기준 기간 안.
+    """재가된 사람 — 합당한자 날짜(_hap_date: 재가한 날) 기준 기간 안.
     구 매칭 시트처럼 인도·교사 소속(지역/반/구역), 섭외자·인도자·교사, 경로·도구·온오프, 최초/이후 만남 결과, 상담연결 날."""
     frm, to = _dates(body)
-    fix_at = """COALESCE((SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'), h.CREATED_AT)"""
+    # 처음 재가한 날. 6~8월 옮겨 온 데이터는 재가 기록이 없어 예전 기준(마지막 만남 픽스 날, 없으면 합재양 작성일)으로 대신함
+    hap_at = """COALESCE((SELECT MIN(a.CREATED_AT) FROM SARANG_ACTIVITY_LOGS a WHERE a.SARANG_ID = s.SARANG_ID AND a.EVENT_TYPE = '재가처리'),
+                      (SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'), h.CREATED_AT)"""
     rows = _q(client, f"""
-        SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.RECRUITMENT_TYPE, {fix_at} AS FIX_AT,
+        SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.RECRUITMENT_TYPE, {hap_at} AS HAP_AT,
                h.ROUTE, h.TOOL, h.MATCH_SCHEDULED_AT,
                gm.NAME AS GUIDE_NAME, gmah.REGION_CODE AS GUIDE_REGION, gmah.DISTRICT_CODE AS GUIDE_DISTRICT,
                COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, tmah.REGION_CODE AS TEACHER_REGION, tmah.DISTRICT_CODE AS TEACHER_DISTRICT
@@ -641,8 +633,8 @@ def erp_match_list(client, body):
           LEFT JOIN MEMBER_AFFILIATION_HISTORIES gmah ON gmah.MEMBER_ID = h.GUIDE_MEMBER_ID AND gmah.IS_CURRENT = 1
           LEFT JOIN MEMBERS tm ON tm.MEMBER_ID = h.TEACHER_MEMBER_ID
           LEFT JOIN MEMBER_AFFILIATION_HISTORIES tmah ON tmah.MEMBER_ID = h.TEACHER_MEMBER_ID AND tmah.IS_CURRENT = 1
-         WHERE s.DELETED_AT IS NULL AND {_in_range(fix_at)}
-         ORDER BY FIX_AT""", [(frm - datetime.timedelta(days=_HAP_LOOKBACK_DAYS)).isoformat(), to.isoformat()], fetch_limit=20000)
+         WHERE s.DELETED_AT IS NULL AND h.APPROVAL_STATUS = 'approved' AND {_in_range(hap_at)}
+         ORDER BY HAP_AT""", [frm.isoformat(), to.isoformat()], fetch_limit=20000)
     matches = {}
     ids = [r['sarang_id'] for r in rows]
     for i in range(0, len(ids), 500):  # IN 목록 1000개 한도
@@ -662,8 +654,7 @@ def erp_match_list(client, body):
         r.update(_match_summary(matches.get(r['sarang_id'], []), r.pop('match_scheduled_at')))
         r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
         r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
-        r['hap_date'] = _hap_date(r['fix_at'], r['first_at'])
-    rows = sorted((r for r in rows if frm.isoformat() <= r['hap_date'] <= to.isoformat()), key=lambda r: (r['hap_date'], r['fix_at']))
+        r['hap_date'] = _hap_date(r['hap_at'])
     return {'rows': rows}
 
 
@@ -697,8 +688,6 @@ if __name__ == '__main__':  # 이름 묶기 확인: python -m api.views.erp
     hist = [m(1, 1, '10-01', 'DELAY', '밀림'), m(1, 2, '10-03', 'SECOND_MEET', '2차만남'), m(2, 1, '10-07', 'CONSULT_WIN', '상담연결')]
     assert _match_summary(hist, None) == {'first_at': '10-03', 'first_result': '2차만남', 'later_result': '상담연결', 'consult_at': '10-07'}
     assert _match_summary([m(1, 1, '10-01', 'SECOND_MEET', '2차만남'), m(2, 1, None, None, None)], None)['later_result'] == '진행 예정'
-    assert _hap_date('2026-10-20T03:00:00Z', '2026-10-22T19:00:00Z') == '2026-10-20'   # 2일 뒤 만남 → 픽스 날
-    assert _hap_date('2026-10-20T03:00:00Z', '2026-10-23T19:00:00Z') == '2026-10-20'   # 딱 3일 → 픽스 날
-    assert _hap_date('2026-10-20T03:00:00Z', '2026-10-30T19:00:00Z') == '2026-10-27'   # 10일 뒤 → 만남 3일 전
-    assert _hap_date('2026-10-20T16:00:00Z', None) == '2026-10-21'                      # KST로 넘어가는 시각, 만남 없음
+    assert _hap_date('2026-10-20T03:00:00Z') == '2026-10-20'
+    assert _hap_date('2026-10-20T16:00:00Z') == '2026-10-21'  # KST로 넘어가는 시각
     print('ok')
