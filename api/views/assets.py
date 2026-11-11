@@ -1925,6 +1925,43 @@ def shed_lookup_teams(request, *args, **kwargs):
 
 @csrf_exempt
 @require_jwt
+def shed_crm_match(request, *args, **kwargs):
+    """홈 합재양 작성(도구노방·사쉐)에서 쓰려는 번호가 합당한 자 CRM(shed로 들어온 사랑이, 합재양 아직 없음)에
+    있으면 그 사람 정보를 돌려줌 — 프론트가 "이 분 맞으신가요?"로 확인 후 CRM 건으로 이어 쓰게 해서,
+    만남 픽스 기록이 빠진 채 새로 등록되는 걸 막음(2026-11-11)."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    phone = re.sub(r'[^0-9]', '', str(_json_body(request).get('phone') or ''))
+    if len(phone) < 10:
+        return JsonResponse({'success': True, 'match': None})
+    r = DataRouterClient().query_one(
+        """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.MBTI, spi.NAME, spi.PHONE,
+                  TO_CHAR(s.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS RECEIVED_DAY,
+                  sid.REGION_NAME, im.NAME AS INTRODUCER_NAME, mah.REGION_CODE AS TEAM,
+                  (SELECT trc.LABEL FROM TM_LOGS t JOIN TM_RESULT_CODES trc ON trc.RESULT_CODE = t.RESULT
+                    WHERE t.SARANG_ID = s.SARANG_ID ORDER BY t.CREATED_AT DESC FETCH FIRST 1 ROWS ONLY) AS LAST_RESULT
+             FROM SARANG s
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN SARANG_INFLOW_DETAILS sid ON sid.SARANG_ID = s.SARANG_ID
+             LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
+             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
+               ON mah.MEMBER_ID = COALESCE(sid.INTRODUCER_MEMBER_ID, s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
+            WHERE spi.PHONE_NORMALIZED = :1 AND s.DELETED_AT IS NULL
+              AND NOT EXISTS (SELECT 1 FROM SARANG_HAB_JAE_YANG h WHERE h.SARANG_ID = s.SARANG_ID AND h.IS_ACTIVE = 1)
+            ORDER BY s.CREATED_AT DESC FETCH FIRST 1 ROWS ONLY""",
+        [phone],
+    )
+    if not r:
+        return JsonResponse({'success': True, 'match': None})
+    return JsonResponse({'success': True, 'match': {
+        'docId': r['sarang_id'], 'name': r['name'], 'phone': r['phone'], 'age': r['age'], 'mbti': r['mbti'],
+        'stage': r['stage'], 'receivedDay': r['received_day'], 'regionName': r['region_name'],
+        'introducer': r['introducer_name'], 'team': r['team'], 'lastResult': r['last_result'],
+    }})
+
+
+@csrf_exempt
+@require_jwt
 def shed_pending_reject(request, *args, **kwargs):
     """SARANG_INTAKE_QUEUE 반려 처리 — SARANG 행은 만들지 않고 상태만 rejected로."""
     if request.method not in ['POST']:

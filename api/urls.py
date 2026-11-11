@@ -111,6 +111,7 @@ api_urlpatterns = [
     path('shed-reject', assets.shed_reject, name='assets_shed_reject'),
     path('shed-revive', assets.shed_revive, name='assets_shed_revive'),
     path('shed/lookup-teams', assets.shed_lookup_teams, name='assets_shed_lookup_teams'),
+    path('shed/crm-match', assets.shed_crm_match, name='assets_shed_crm_match'),
     path('shed-pending-reject', assets.shed_pending_reject, name='assets_shed_pending_reject'),
     path('shed-webhook', assets.shed_webhook, name='assets_shed_webhook'),
     path('shed/pending-list', assets.shed_pending_list, name='assets_shed_pending_list'),
