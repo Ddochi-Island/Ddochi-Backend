@@ -125,6 +125,8 @@ def _fetch_unified_rows(client, regions):
                    TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                    TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
                    TO_CHAR(hj.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DATE,
+                   (SELECT TO_CHAR(MAX(t.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
+                      FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX') AS FIX_DATE,
                    (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
                       FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
               FROM SARANG s
@@ -168,7 +170,7 @@ def _build_unified_text(group, title, rows, region_chat_map=None):
     groups = {}
     for r in rows:
         display_date = _display_date(r, today)
-        # 재가된 건은 묶음 날짜(합재양 작성일 기준)가 오늘보다 이전이면 숨김 — 만남 일정은 매칭 현황판에서 봄.
+        # 재가된 건은 묶음 날짜(재가한 날)가 오늘보다 이전이면 숨김 — 만남 일정은 매칭 현황판에서 봄.
         # 재가 대기 건은 날짜가 지나도 남김 (2026-10-15 사용자 결정)
         if (r['approval_status'] == 'approved' and display_date < today) or _approved_expired(r, display_date, two_days_ago):
             continue

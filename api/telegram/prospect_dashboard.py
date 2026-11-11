@@ -25,6 +25,8 @@ def _fetch_rows(client, team_id):
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
                   TO_CHAR(hj.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DATE,
+                  (SELECT TO_CHAR(MAX(t.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
+                     FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX') AS FIX_DATE,
                   (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
                      FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
              FROM SARANG s
@@ -58,16 +60,12 @@ def _fmt_md(date_str):
 
 
 def _display_date(r, today):
-    """그룹 위치 = 합재양 작성일(KST). 단 매칭(만남) 예정일이 작성일보다 3일 넘게 뒤면 "매칭 3일 전"으로
-    당겨서, 그룹 날짜가 매칭 3일 이내에 들어오게 함(2026-09-28 사용자 결정 — 레거시 공식과 같되 기준이
-    등록일 대신 합재양 작성일). 재가 여부와 무관해서 재가해도 그룹이 안 움직임. 재가 후 일정 변경은
-    SARANG_MATCH_HISTORIES에만 반영되고 MATCH_SCHEDULED_AT은 안 바뀌어 그룹은 고정됨."""
-    base = datetime.date.fromisoformat(r['hj_date']) if r.get('hj_date') else today
-    if r.get('mt_date'):
-        mt = datetime.date.fromisoformat(r['mt_date'])
-        if (mt - base).days > 3:
-            return mt - datetime.timedelta(days=3)
-    return base
+    """그룹 위치 — 재가 전엔 만남 픽스 날, 재가하면 재가한 날(KST, 2026-11-11 사용자 결정. 전엔 합재양 작성일 + 만남 3일 전 규칙).
+    만남 픽스 기록이 없으면(합재양에서 바로 등록) 합재양 작성일."""
+    if r['approval_status'] == 'approved' and r.get('appr_date'):
+        return datetime.date.fromisoformat(r['appr_date'])
+    base = r.get('fix_date') or r.get('hj_date')
+    return datetime.date.fromisoformat(base) if base else today
 
 def _approved_expired(r, display_date, two_days_ago):
     """재가된 건 제거 시점 — 재가한 날로부터 2일(2026-09-28 사용자 결정: 찾기 날짜로 묶되, 재가 직후 판에서
@@ -86,7 +84,7 @@ def _build_text(team_id, rows, chat_id):
     groups = {}
     for r in rows:
         display_date = _display_date(r, today)
-        # 재가된 건은 묶음 날짜(합재양 작성일 기준)가 오늘보다 이전이면 숨김 — 만남 일정은 매칭 현황판에서 봄.
+        # 재가된 건은 묶음 날짜(재가한 날)가 오늘보다 이전이면 숨김 — 만남 일정은 매칭 현황판에서 봄.
         # 재가 대기 건은 날짜가 지나도 남김 (2026-10-15 사용자 결정)
         if (r['approval_status'] == 'approved' and display_date < today) or _approved_expired(r, display_date, two_days_ago):
             continue
