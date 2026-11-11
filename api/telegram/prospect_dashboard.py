@@ -27,7 +27,7 @@ def _fetch_rows(client, team_id):
                   TO_CHAR(hj.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DATE,
                   (SELECT TO_CHAR(MAX(t.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
                      FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX') AS FIX_DATE,
-                  (SELECT TO_CHAR(MAX(al.CREATED_AT AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')
+                  (SELECT TO_CHAR(MAX((al.CREATED_AT + INTERVAL '2' HOUR) AT TIME ZONE 'Asia/Seoul'), 'YYYY-MM-DD')  -- 22시 이후 재가는 다음 날
                      FROM SARANG_ACTIVITY_LOGS al WHERE al.SARANG_ID = s.SARANG_ID AND al.EVENT_TYPE = '재가처리') AS APPR_DATE
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
