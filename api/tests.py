@@ -146,6 +146,10 @@ class ProspectDashboardDateTests(SimpleTestCase):
         self.assertEqual(_display_date({'approval_status': 'pending', 'fix_date': None, 'hj_date': '2026-11-09'}, today), date(2026, 11, 9))
         # 재가됐지만 재가 기록 없음(옛 데이터) → 만남 픽스 날
         self.assertEqual(_display_date({'approval_status': 'approved', 'appr_date': None, 'fix_date': '2026-11-08'}, today), date(2026, 11, 8))
+        # 재가 전, 만남이 3일 넘게 뒤 → 만남 3일 전으로 당김
+        self.assertEqual(_display_date({'approval_status': 'pending', 'fix_date': '2026-11-04', 'mt_date': '2026-11-30'}, today), date(2026, 11, 27))
+        # 만남이 3일 이내 → 그대로
+        self.assertEqual(_display_date({'approval_status': 'pending', 'fix_date': '2026-11-12', 'mt_date': '2026-11-15'}, today), date(2026, 11, 12))
 
     def test_approved_kept_two_days_after_approval(self):
         from datetime import date

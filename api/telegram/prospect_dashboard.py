@@ -60,12 +60,18 @@ def _fmt_md(date_str):
 
 
 def _display_date(r, today):
-    """그룹 위치 — 재가 전엔 만남 픽스 날, 재가하면 재가한 날(KST, 2026-11-11 사용자 결정. 전엔 합재양 작성일 + 만남 3일 전 규칙).
-    만남 픽스 기록이 없으면(합재양에서 바로 등록) 합재양 작성일."""
+    """그룹 위치 — 재가 전엔 만남 픽스 날, 재가하면 재가한 날(KST, 2026-11-11 사용자 결정).
+    만남 픽스 기록이 없으면(합재양에서 바로 등록) 합재양 작성일. 재가 전 건은 만남 예정일이 3일 넘게 뒤면
+    "만남 3일 전"으로 당겨 만남 3일 이내 날짜에 묶음(2026-11-12 사용자 결정)."""
     if r['approval_status'] == 'approved' and r.get('appr_date'):
         return datetime.date.fromisoformat(r['appr_date'])
     base = r.get('fix_date') or r.get('hj_date')
-    return datetime.date.fromisoformat(base) if base else today
+    base = datetime.date.fromisoformat(base) if base else today
+    if r.get('mt_date'):
+        mt = datetime.date.fromisoformat(r['mt_date'])
+        if (mt - base).days > 3:
+            return mt - datetime.timedelta(days=3)
+    return base
 
 def _approved_expired(r, display_date, two_days_ago):
     """재가된 건 제거 시점 — 재가한 날로부터 2일(2026-09-28 사용자 결정: 찾기 날짜로 묶되, 재가 직후 판에서
