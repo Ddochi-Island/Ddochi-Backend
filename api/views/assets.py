@@ -204,6 +204,13 @@ def get_assets(request, *args, **kwargs):
               AND s.STAGE NOT IN ('유입', '티엠')
               AND s.DELETED_AT IS NULL
               AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY
+              -- 합당한 자 CRM에서 만남 픽스만 누르고 합재양은 홈에서 따로 써서 생긴 빈 쌍둥이 건(같은 번호에
+              -- 합재양 있는 건이 따로 있음)은 날짜 미정 🔒으로 계속 남아서 뺌(2026-11-15)
+              AND NOT (hj.HAB_JAE_YANG_ID IS NULL AND EXISTS (
+                    SELECT 1 FROM SARANG s2
+                      JOIN SARANG_PERSONAL_INFO p2 ON p2.PERSONAL_INFO_ID = s2.PERSONAL_INFO_ID
+                      JOIN SARANG_HAB_JAE_YANG h2 ON h2.SARANG_ID = s2.SARANG_ID AND h2.IS_ACTIVE = 1
+                     WHERE p2.PHONE_NORMALIZED = spi.PHONE_NORMALIZED AND s2.SARANG_ID <> s.SARANG_ID AND s2.DELETED_AT IS NULL))
             ORDER BY s.CREATED_AT DESC
             FETCH FIRST 1000 ROWS ONLY""",
         [team_id],

@@ -123,7 +123,10 @@ def _build_text(team_id, rows):
         for i, r in enumerate(hist):
             nxt = hist[i + 1] if i + 1 < len(hist) else None
             prev = hist[i - 1] if i > 0 else None
-            if r['result'] and r['mt_date'] and datetime.date.fromisoformat(r['mt_date']) < two_days_ago:
+            # 날짜 미정인데 결과 난 시도(밀림 뒤 날짜 없이 취소 등)는 밀리기 전 시도의 날짜로 판단 —
+            # 날짜가 없어 이 규칙이 안 걸려서 30일 내내 남아 있었음(2026-11-15 사용자 결정)
+            gone_date = r['mt_date'] or (prev and prev['mt_date'])
+            if r['result'] and gone_date and datetime.date.fromisoformat(gone_date) < two_days_ago:
                 continue
             if is_all and r['mt_date'] and not (window_start <= datetime.date.fromisoformat(r['mt_date']) <= window_end):
                 continue
