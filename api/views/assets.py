@@ -159,7 +159,7 @@ def get_assets(request, *args, **kwargs):
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
                   hj.MATCH_LOCATION, hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y,
                   hj.APPLICATION_PURPOSE, hj.SELF_IMAGE, hj.DESIRED_IMAGE, hj.CHARACTER_NOTE,
-                  hj.ALERT_NOTE, hj.DISTANCE_BURDEN, hj.QNA, hj.ETC,
+                  hj.ALERT_NOTE, hj.ALERT_PUSH_OUT, hj.DISTANCE_BURDEN, hj.QNA, hj.ETC,
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.REJECT_REASON,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
                   COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, hj.TEACHER_MEMBER_ID,
@@ -327,6 +327,7 @@ def get_assets(request, *args, **kwargs):
                 'trouble': r['desired_image'] or '',
                 'att': r['character_note'] or '',
                 'wary': r['alert_note'] or '',
+                'waryPush': {'1': 'O', '0': 'X'}.get(r['alert_push_out'], ''),
                 'dist': r['distance_burden'] or '',
                 'qna': r['qna'] or '',
                 'etc': r['etc'] or '',
@@ -620,6 +621,7 @@ def submit_result(request, *args, **kwargs):
             _trunc_chars(str(hj.get('dist') or '').strip() or None, 1000),
             _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc_chars(str(hj.get('etc') or '').strip() or None, 1000),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
+            _ox(hj.get('waryPush')) if hj.get('waryPush') else None,
         ]
 
         existing = client.query_one(
@@ -637,8 +639,8 @@ def submit_result(request, *args, **kwargs):
                                  SCHOOL_MAJOR_JOB = :13, SCHEDULE = :14, ENVIRONMENT_1Y = :15, APPLICATION_PURPOSE = :16,
                                  SELF_IMAGE = :17, DESIRED_IMAGE = :18, CHARACTER_NOTE = :19, ALERT_NOTE = :20, DISTANCE_BURDEN = :21,
                                  QNA = :22, ETC = :23,
-                                 HAS_CENTER_ENV = :24, IS_TAKING_MEDS = :25, HAS_MENTAL_ILLNESS = :26
-                           WHERE HAB_JAE_YANG_ID = :27""",
+                                 HAS_CENTER_ENV = :24, IS_TAKING_MEDS = :25, HAS_MENTAL_ILLNESS = :26, ALERT_PUSH_OUT = :27
+                           WHERE HAB_JAE_YANG_ID = :28""",
                 'args': hj_args_common + [existing['hab_jae_yang_id']],
             }
         else:
@@ -650,13 +652,13 @@ def submit_result(request, *args, **kwargs):
                              SCHOOL_MAJOR_JOB, SCHEDULE, ENVIRONMENT_1Y, APPLICATION_PURPOSE,
                              SELF_IMAGE, DESIRED_IMAGE, CHARACTER_NOTE, ALERT_NOTE, DISTANCE_BURDEN,
                              QNA, ETC,
-                             HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS)
+                             HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS, ALERT_PUSH_OUT)
                           VALUES (:1, :2, :3, :4, :5, :6, :7,
                                   CASE WHEN :8 IS NOT NULL THEN TO_TIMESTAMP(:9, 'YYYY-MM-DD"T"HH24:MI') END, :10,
                                   :11, :12, :13, :14,
                                   :15, :16, :17, :18,
                                   :19, :20, :21, :22, :23,
-                                  :24, :25, :26, :27, :28)""",
+                                  :24, :25, :26, :27, :28, :29)""",
                 'args': [uuid.uuid4().hex.upper(), sarang_id] + hj_args_common,
             }
 
@@ -1234,13 +1236,13 @@ def submit_habjaeyang_new(request, *args, **kwargs):
                      SCHOOL_MAJOR_JOB, SCHEDULE, ENVIRONMENT_1Y, APPLICATION_PURPOSE,
                      SELF_IMAGE, DESIRED_IMAGE, CHARACTER_NOTE, ALERT_NOTE, DISTANCE_BURDEN,
                      QNA, ETC,
-                     HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS)
+                     HAS_CENTER_ENV, IS_TAKING_MEDS, HAS_MENTAL_ILLNESS, ALERT_PUSH_OUT)
                   VALUES (:1, :2, :3, :4, :5, :6, :7,
                           CASE WHEN :8 IS NOT NULL THEN TO_TIMESTAMP(:9, 'YYYY-MM-DD"T"HH24:MI') END, :10,
                           :11, :12, :13, :14,
                           :15, :16, :17, :18,
                           :19, :20, :21, :22, :23,
-                          :24, :25, :26, :27, :28)""",
+                          :24, :25, :26, :27, :28, :29)""",
         'args': [
             uuid.uuid4().hex.upper(), sarang_id, guide_id, caller_id, _trunc_chars(path_val, 50), _trunc_chars(tool_val, 50), _ox(hj.get('verbalManFix')),
             mt_datetime, mt_datetime, _trunc_chars(str(hj.get('mtPlace') or '').strip() or None, 100),
@@ -1253,6 +1255,7 @@ def submit_habjaeyang_new(request, *args, **kwargs):
             _trunc_chars(str(hj.get('dist') or '').strip() or None, 1000),
             _trunc(str(hj.get('qna') or '').strip() or None, 1000), _trunc_chars(str(hj.get('etc') or '').strip() or None, 1000),
             _ox(hj.get('centerEnv')), _ox(hj.get('drug')), _ox(hj.get('mental')),
+            _ox(hj.get('waryPush')) if hj.get('waryPush') else None,
         ],
     })
 

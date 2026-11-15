@@ -89,7 +89,7 @@ def _fetch(client, sarang_id):
                   hj.GWACHEON_TRAVEL_TIME, hj.GWACHEON_TRANSFER_COUNT,
                   hj.CENTER_TRAVEL_TIME, hj.CENTER_TRANSFER_COUNT,
                   hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y, hj.APPLICATION_PURPOSE,
-                  hj.SELF_IMAGE, hj.DESIRED_IMAGE, hj.CHARACTER_NOTE, hj.ALERT_NOTE, hj.DISTANCE_BURDEN, hj.ETC,
+                  hj.SELF_IMAGE, hj.DESIRED_IMAGE, hj.CHARACTER_NOTE, hj.ALERT_NOTE, hj.ALERT_PUSH_OUT, hj.DISTANCE_BURDEN, hj.ETC,
                   hj.HAS_CENTER_ENV, hj.IS_TAKING_MEDS, hj.HAS_MENTAL_ILLNESS,
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.TELEGRAM_MSG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
@@ -161,6 +161,7 @@ def _build_text(row):
         f"▪️ 기타\n"
         f"• 인성(전화 태도) : {row['character_note'] or '-'}\n"
         f"• 경계 : {row['alert_note'] or '-'}\n"
+        f"  : 있을시 밀어내기 진행 여부 {({'1': '⭕️', '0': '❌'}).get(row['alert_push_out'], '-')}\n"
         f"• 거리부담 : {row['distance_burden'] or '-'}\n"
         f"• 특이사항 : {row['etc'] or '-'}\n\n"
         f"▪️ 합자 체크\n"
