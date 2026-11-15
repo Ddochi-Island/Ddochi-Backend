@@ -161,7 +161,7 @@ def _build_text(row):
         f"▪️ 기타\n"
         f"• 인성(전화 태도) : {row['character_note'] or '-'}\n"
         f"• 경계 : {row['alert_note'] or '-'}\n"
-        f"  : 있을시 밀어내기 진행 여부 {({'1': '⭕️', '0': '❌'}).get(row['alert_push_out'], '-')}\n"
+        f"  : 경계 있을시 밀어내기 진행 여부 {({'1': '⭕️', '0': '❌'}).get(row['alert_push_out'], '-')}\n"
         f"• 거리부담 : {row['distance_burden'] or '-'}\n"
         f"• 특이사항 : {row['etc'] or '-'}\n\n"
         f"▪️ 합자 체크\n"

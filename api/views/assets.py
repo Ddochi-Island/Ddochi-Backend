@@ -77,6 +77,24 @@ def _parse_transfer_label(label):
     return int(m.group(1)) if m else None
 
 
+def _min_label(n):
+    """_parse_min_label의 반대 — 합재양 수정 화면 select 값으로 되돌림."""
+    if n is None or n == '':
+        return ''
+    n = int(n)
+    if n >= 120:
+        return '2시간 이상'
+    h, m = divmod(n, 60)
+    return ' '.join(x for x in [f'{h}시간' if h else '', f'{m}분' if m else ''] if x) or '미정'
+
+
+def _transfer_label(n):
+    if n is None or n == '':
+        return ''
+    n = int(n)
+    return '3회 이상' if n >= 3 else f'{n}회'
+
+
 def _ox(v):
     return 1 if str(v or '').strip().upper() == 'O' else 0
 
@@ -160,6 +178,8 @@ def get_assets(request, *args, **kwargs):
                   hj.MATCH_LOCATION, hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y,
                   hj.APPLICATION_PURPOSE, hj.SELF_IMAGE, hj.DESIRED_IMAGE, hj.CHARACTER_NOTE,
                   hj.ALERT_NOTE, hj.ALERT_PUSH_OUT, hj.DISTANCE_BURDEN, hj.QNA, hj.ETC,
+                  hj.GWACHEON_TRAVEL_TIME, hj.GWACHEON_TRANSFER_COUNT, hj.CENTER_TRAVEL_TIME, hj.CENTER_TRANSFER_COUNT,
+                  hj.HAS_CENTER_ENV, hj.IS_TAKING_MEDS, hj.HAS_MENTAL_ILLNESS,
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.REJECT_REASON,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
                   COALESCE(tcm.NAME, hj.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, hj.TEACHER_MEMBER_ID,
@@ -328,6 +348,12 @@ def get_assets(request, *args, **kwargs):
                 'att': r['character_note'] or '',
                 'wary': r['alert_note'] or '',
                 'waryPush': {'1': 'O', '0': 'X'}.get(r['alert_push_out'], ''),
+                # 수정 화면에서 다시 채우는 값 — 빠져 있으면 수정 저장 때 비어서 덮어써짐
+                'gwacheonMin': _min_label(r['gwacheon_travel_time']), 'gwacheonTransfer': _transfer_label(r['gwacheon_transfer_count']),
+                'centerMin': _min_label(r['center_travel_time']), 'centerTransfer': _transfer_label(r['center_transfer_count']),
+                'centerEnv': {'1': 'O', '0': 'X'}.get(r['has_center_env'], ''),
+                'drug': {'1': 'O', '0': 'X'}.get(r['is_taking_meds'], ''),
+                'mental': {'1': 'O', '0': 'X'}.get(r['has_mental_illness'], ''),
                 'dist': r['distance_burden'] or '',
                 'qna': r['qna'] or '',
                 'etc': r['etc'] or '',
