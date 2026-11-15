@@ -825,6 +825,13 @@ def _toggle_hj_field(client, sarang_id, col):
     return new_val
 
 
+_HJ_SELECT_COLS = {
+    'gwacheonMin': ('GWACHEON_TRAVEL_TIME', _parse_min_label), 'gwacheonTransfer': ('GWACHEON_TRANSFER_COUNT', _parse_transfer_label),
+    'centerMin': ('CENTER_TRAVEL_TIME', _parse_min_label), 'centerTransfer': ('CENTER_TRANSFER_COUNT', _parse_transfer_label),
+    'waryPush': ('ALERT_PUSH_OUT', lambda v: _ox(v) if v else None),
+}
+
+
 @csrf_exempt
 @require_jwt
 def edit_match(request, *args, **kwargs):
@@ -928,6 +935,10 @@ def edit_match(request, *args, **kwargs):
             f"UPDATE SARANG_HAB_JAE_YANG SET {'ROUTE' if edit_type == 'path' else 'TOOL'} = :1 WHERE SARANG_ID = :2 AND IS_ACTIVE = 1",
             [_trunc_chars(str(value or '').strip() or None, 50), sarang_id],
         )
+    elif edit_type in _HJ_SELECT_COLS:
+        # 합재양 보기의 과천·센터 시간/환승, 경계 밀어내기 O/X select — 작성 폼과 같은 라벨로 받음
+        col, parse = _HJ_SELECT_COLS[edit_type]
+        client.exec(f"UPDATE SARANG_HAB_JAE_YANG SET {col} = :1 WHERE HAB_JAE_YANG_ID = :2", [parse(value), hj_id])
     else:
         return JsonResponse({'success': False, 'message': f'지원 안 되는 type: {edit_type}'})
 
@@ -937,7 +948,7 @@ def edit_match(request, *args, **kwargs):
         except Exception:
             logging.getLogger('api.views.assets').warning('[edit_match] matching dashboard refresh failed', exc_info=True)
 
-    if edit_type in ('date', 'subGuide', 'gender', 'age', 'residence', 'phone', 'path', 'tool'):
+    if edit_type in ('date', 'subGuide', 'gender', 'age', 'residence', 'phone', 'path', 'tool', *_HJ_SELECT_COLS):
         # 이 필드들은 찾기현황판 채팅방에 올라간 개별 합재양 카드 본문에도 그대로
         # 나오는데(이름/성별/나이/연락처/거주지/매칭일시), 여기서 갱신 안 하면 카드는
         # 수정 전 값으로 영영 고정되고 찾기현황판 목록(항상 최신 DB에서 다시 그림)만
