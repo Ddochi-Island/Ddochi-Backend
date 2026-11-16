@@ -104,7 +104,24 @@ def daily_report_list_names(request, *args, **kwargs):
               'activity': _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else '',
               'alwaysFace': r['always_face'] == '1'}
              for r in rows]
-    return JsonResponse({'success': True, 'names': names, 'isAreaLead': is_area_lead})
+    # 구역장용 "구역원 추가" 후보 — 같은 구역의 직책이 회원뿐인 활동 회원(명단엔 안 뜸). 그날 활동이 이미 있으면
+    # 화면이 처음부터 담아 둠(2026-11-16)
+    others = []
+    if is_area_lead:
+        shown = {r['name'] for r in rows}
+        others = [{'name': r['name'], 'activity': _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else ''}
+                  for r in client.query(
+                      """SELECT m.NAME, MAX(dr.ACTIVITY) AS ACTIVITY
+                           FROM MEMBERS m
+                           JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+                           JOIN MEMBER_AFFILIATION_HISTORIES me ON me.MEMBER_ID = :1 AND me.IS_CURRENT = 1
+                                AND me.REGION_CODE = mah.REGION_CODE AND me.DISTRICT_CODE = mah.DISTRICT_CODE
+                           LEFT JOIN DAILY_REPORTS dr ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:2, 'YYYY-MM-DD')
+                          WHERE m.DELETED_AT IS NULL AND m.STATUS = 'ACTIVE'
+                          GROUP BY m.NAME ORDER BY m.NAME""",
+                      [sabun, date_key],
+                  ) if r['name'] not in shown]
+    return JsonResponse({'success': True, 'names': names, 'isAreaLead': is_area_lead, 'others': others})
 
 
 @csrf_exempt
