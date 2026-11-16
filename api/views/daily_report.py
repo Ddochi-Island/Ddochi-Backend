@@ -36,7 +36,8 @@ _ACTIVITY_CODE_TO_KO = {v: k for k, v in _ACTIVITY_KO_TO_CODE.items()} | {'offli
 # 전도팀장 이상 사명자 + 청년회 사명자 — 우리 구역 활동에서 항상 대면으로 고정(2026-11-16 사용자 결정)
 _ALWAYS_FACE_CODES = ('executive', 'region_lead', 'region_general_secretary', 'region_clerk', 'region_mission_clerk',
                       'team_lead', 'team_evangelist', 'youth_chair', 'youth_general_secretary', 'youth_mission_lead',
-                      'youth_mission_manager', 'youth_mission_clerk', 'youth_mission_sub_clerk', 'youth_visit_secretary')
+                      'youth_mission_manager', 'youth_mission_clerk', 'youth_mission_sub_clerk', 'youth_visit_secretary',
+                      'youth_mission_head')
 _ALWAYS_FACE_SQL = ', '.join(f"'{c}'" for c in _ALWAYS_FACE_CODES)
 
 
