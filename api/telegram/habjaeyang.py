@@ -25,6 +25,25 @@ HJ_REJECT_REASONS = ['매칭취소', '환경반려', '인성반려', '중섭반�
 _WEEK_MS = 7 * 24 * 3600_000
 _KST = datetime.timezone(datetime.timedelta(hours=9))
 
+# 중섭 표시 — 같은 번호로 이 합재양보다 먼저 쓴 합재양(다른 사랑이 건) 수와 가장 최근 것 요약(2026-11-16).
+# 별칭 s(SARANG)·spi(SARANG_PERSONAL_INFO)·hj(SARANG_HAB_JAE_YANG)가 있는 쿼리에 끼워 씀(get_assets도 같이 씀).
+_PRIOR_HJ_FROM = """FROM SARANG s2
+                   JOIN SARANG_PERSONAL_INFO p2 ON p2.PERSONAL_INFO_ID = s2.PERSONAL_INFO_ID
+                   JOIN SARANG_HAB_JAE_YANG h2 ON h2.SARANG_ID = s2.SARANG_ID
+                   LEFT JOIN MEMBERS g2 ON g2.MEMBER_ID = h2.GUIDE_MEMBER_ID
+                  WHERE p2.PHONE_NORMALIZED = spi.PHONE_NORMALIZED AND s2.SARANG_ID <> s.SARANG_ID
+                    AND s2.DELETED_AT IS NULL AND h2.CREATED_AT < hj.CREATED_AT"""
+PRIOR_HJ_COLS = f"""(SELECT COUNT(*) {_PRIOR_HJ_FROM}) AS PRIOR_CNT,
+                  (SELECT TO_CHAR(h2.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'MM/DD') || ' · 인도자 ' || NVL(g2.NAME, '-') || ' · '
+                          || CASE h2.APPROVAL_STATUS WHEN 'approved' THEN '재가' WHEN 'rejected' THEN '반려' ELSE '대기' END
+                     {_PRIOR_HJ_FROM} ORDER BY h2.CREATED_AT DESC FETCH FIRST 1 ROWS ONLY) AS PRIOR_LAST"""
+
+
+def prior_hj_label(row):
+    """'🔁 중섭 · 이전 합재양 N건 (최근 10/20 · 인도자 OOO · 재가)' — 이전 합재양이 없으면 ''."""
+    n = int(row.get('prior_cnt') or 0)
+    return f"🔁 중섭 · 이전 합재양 {n}건 (최근 {row.get('prior_last') or '-'})" if n else ''
+
 
 def _hj_sign_ts(match_scheduled_at, now_ms=None):
     """버튼 서명 시각 — 만남 예정일(KST 그날 끝)로 당겨 넣어 '만남 예정일 + 7일'까지 눌리게.
@@ -82,7 +101,7 @@ def build_hj_reason_keyboard(sarang_id, secret, chat_id):
 
 def _fetch(client, sarang_id):
     return client.query_one(
-        """SELECT s.SARANG_ID, s.AGE, s.GENDER, s.MBTI, s.INFLOW_MEMBER_ID,
+        f"""SELECT s.SARANG_ID, s.AGE, s.GENDER, s.MBTI, s.INFLOW_MEMBER_ID,
                   spi.NAME AS PI_NAME, spi.PHONE AS PI_PHONE, spi.RESIDENCE_STATION,
                   hj.HAB_JAE_YANG_ID, hj.ROUTE, hj.TOOL,
                   hj.MATCH_SCHEDULED_AT, hj.MATCH_LOCATION,
@@ -93,7 +112,8 @@ def _fetch(client, sarang_id):
                   hj.HAS_CENTER_ENV, hj.IS_TAKING_MEDS, hj.HAS_MENTAL_ILLNESS,
                   hj.HAS_REPLIED, hj.IS_WINDOW_OPENED, hj.APPROVAL_STATUS, hj.TELEGRAM_MSG_ID,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
-                  mah.REGION_CODE AS TEAM_ID
+                  mah.REGION_CODE AS TEAM_ID,
+                  {PRIOR_HJ_COLS}
              FROM SARANG s
              JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
              LEFT JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
@@ -137,7 +157,9 @@ def _build_text(row):
     gwacheon = _travel_label(row['gwacheon_travel_time'], row['gwacheon_transfer_count'])
     center = _travel_label(row['center_travel_time'], row['center_transfer_count'])
 
+    dup = prior_hj_label(row)
     return (
+        (f"{dup}\n\n" if dup else '') +
         f"🐑 대학 {row['team_id'] or '-'}지역의 합재양 🐑\n"
         f"[청년회 통합 Ver.]\n"
         f"- 인도자/티엠자 : {row['guide_name'] or '-'} / {row['caller_name'] or '-'}\n"

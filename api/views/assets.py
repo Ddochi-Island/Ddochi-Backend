@@ -17,7 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient, DataRouterError
-from api.telegram.habjaeyang import _build_text as _build_hj_text, _fetch as _fetch_hj, send_habjaeyang_to_telegram
+from api.telegram.habjaeyang import PRIOR_HJ_COLS, _build_text as _build_hj_text, _fetch as _fetch_hj, prior_hj_label, send_habjaeyang_to_telegram
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_groups_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
@@ -170,10 +170,10 @@ def get_assets(request, *args, **kwargs):
     team_id = ctx['team_id']
 
     rows = client.query(
-        """SELECT s.SARANG_ID, s.STAGE, s.AGE, s.GENDER, s.MBTI, s.CREATED_AT,
+        f"""SELECT s.SARANG_ID, s.STAGE, s.AGE, s.GENDER, s.MBTI, s.CREATED_AT,
                   spi.NAME, spi.PHONE, spi.RESIDENCE_STATION,
                   im.NAME AS MANAGER_NAME,
-                  hj.HAB_JAE_YANG_ID, hj.ROUTE, hj.TOOL,
+                  hj.HAB_JAE_YANG_ID, hj.ROUTE, hj.TOOL, {PRIOR_HJ_COLS},
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'YYYY-MM-DD') AS MT_DATE,
                   TO_CHAR(hj.MATCH_SCHEDULED_AT, 'HH24:MI') AS MT_TIME,
                   hj.MATCH_LOCATION, hj.SCHOOL_MAJOR_JOB, hj.SCHEDULE, hj.ENVIRONMENT_1Y,
@@ -356,6 +356,7 @@ def get_assets(request, *args, **kwargs):
                 'att': r['character_note'] or '',
                 'wary': r['alert_note'] or '',
                 'waryPush': {'1': 'O', '0': 'X'}.get(r['alert_push_out'], ''),
+                'dupLabel': prior_hj_label(r),  # 🔁 중섭 표시(같은 번호로 먼저 쓴 합재양)
                 # 수정 화면에서 다시 채우는 값 — 빠져 있으면 수정 저장 때 비어서 덮어써짐
                 'gwacheonMin': _min_label(r['gwacheon_travel_time']), 'gwacheonTransfer': _transfer_label(r['gwacheon_transfer_count']),
                 'centerMin': _min_label(r['center_travel_time']), 'centerTransfer': _transfer_label(r['center_transfer_count']),
