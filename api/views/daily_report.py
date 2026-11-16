@@ -20,13 +20,17 @@ logger = logging.getLogger('api.views.daily_report')
 # 매번 위반됨 — 2026-09-25 실사용자 신고로 발견(제출할 때마다 500 나고 있었음,
 # 이 화면이 사실상 한 번도 정상 동작한 적 없었던 것으로 보임). 프론트는 안 건드리고
 # 여기서 왕복 변환.
+# 2026-11-16 활동자 기준 변경: 대면/전단지/비대면/대체. 오프찾은 대면에 포함돼 선택지에서 빠짐 —
+# 옛 화면·임시저장에서 오는 '오프찾 했어!'는 그대로 받고, 옛 offlineSearch 보고는 '대면 활동!'으로 보여줌.
 _ACTIVITY_KO_TO_CODE = {
     '활동을 하지 못했어..': 'none',
-    '비대면 활동!': 'online',
     '대면 활동!': 'offline',
+    '전단지 활동!': 'flyer',
+    '비대면 활동!': 'online',
+    '대체 활동!': 'substitute',
     '오프찾 했어!': 'offlineSearch',
 }
-_ACTIVITY_CODE_TO_KO = {v: k for k, v in _ACTIVITY_KO_TO_CODE.items()}
+_ACTIVITY_CODE_TO_KO = {v: k for k, v in _ACTIVITY_KO_TO_CODE.items()} | {'offlineSearch': '대면 활동!'}
 
 
 def _json_body(request):

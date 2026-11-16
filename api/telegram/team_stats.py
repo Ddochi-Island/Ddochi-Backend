@@ -24,6 +24,14 @@ logger = logging.getLogger('api.telegram.team_stats')
 _WEEK = ['일', '월', '화', '수', '목', '금', '토']
 _BAR_LEN = 7
 
+# 활동자 기준(2026-11-16 공지) — 공지 순서. 옛 offlineSearch(오프찾)는 새 기준에서 대면(찾기)에 포함.
+_ACTIVITY_GROUPS = {'offline': '👥 대면활동', 'flyer': '📄 전단지활동', 'online': '🌐 비대면활동', 'substitute': '🔄 대체활동'}
+
+
+def _activity_group(code):
+    code = 'offline' if code == 'offlineSearch' else code
+    return code if code in _ACTIVITY_GROUPS else None
+
 
 def _fmt_md(date_str):
     d = datetime.date.fromisoformat(date_str)
@@ -169,7 +177,7 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_s
 
     talk = dm = qr = promo_cnt = 0
     reported_names = set()
-    act_untact, act_contact, act_off = [], [], []
+    acts = {k: [] for k in _ACTIVITY_GROUPS}
     todays_promos = []
     for r in reports:
         reported_names.add(r['name'])
@@ -186,12 +194,11 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_s
             todays_promos.append(f"{r['name']}/{p}")
         is_final = r['is_final'] == '1'
         item = f"{r['name']}✅" if is_final else r['name']
-        if r['activity'] == 'online':
-            act_untact.append(item)
-        elif r['activity'] == 'offline':
-            act_contact.append(item); slot['off_act'] += 1
-        elif r['activity'] == 'offlineSearch':
-            act_off.append(item); slot['off_act'] += 1
+        group = _activity_group(r['activity'])
+        if group:
+            acts[group].append(item)
+        if group == 'offline':
+            slot['off_act'] += 1
 
     for a in approvals:
         dc = a['district_code'] or '-'
@@ -265,21 +272,12 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_s
     if unreported:
         lines.append(', '.join(unreported))
     lines.append('')
-    lines.append(f'🌐 비대면활동 ({len(act_untact)}명)')
-    lines.append('')
-    if act_untact:
-        lines.append(', '.join(act_untact))
-    lines.append('')
-    lines.append(f'👥 대면활동 ({len(act_contact)}명)')
-    lines.append('')
-    if act_contact:
-        lines.append(', '.join(act_contact))
-    lines.append('')
-    lines.append(f'🏃 오프찾활동 ({len(act_off)}명)')
-    lines.append('')
-    if act_off:
-        lines.append(', '.join(act_off))
-    lines.append('')
+    for key, title in _ACTIVITY_GROUPS.items():
+        lines.append(f'{title} ({len(acts[key])}명)')
+        lines.append('')
+        if acts[key]:
+            lines.append(', '.join(acts[key]))
+        lines.append('')
 
     lines.append('---------------------------')
     lines.append('')

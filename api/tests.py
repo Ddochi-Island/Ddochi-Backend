@@ -162,6 +162,19 @@ class ProspectDashboardDateTests(SimpleTestCase):
         self.assertFalse(_approved_expired({'approval_status': 'pending', 'appr_date': None}, old_find, cutoff))
 
 
+class ActivityGroupTests(SimpleTestCase):
+    def test_new_criteria_groups(self):
+        from api.telegram.team_stats import _activity_group
+        from api.views.daily_report import _ACTIVITY_CODE_TO_KO, _ACTIVITY_KO_TO_CODE
+        # 옛 오프찾은 대면으로 셈(2026-11-16)
+        self.assertEqual(_activity_group('offlineSearch'), 'offline')
+        self.assertEqual(_activity_group('flyer'), 'flyer')
+        self.assertEqual(_activity_group('substitute'), 'substitute')
+        self.assertIsNone(_activity_group('none'))
+        self.assertEqual(_ACTIVITY_CODE_TO_KO['offlineSearch'], '대면 활동!')
+        self.assertEqual(_ACTIVITY_KO_TO_CODE['대체 활동!'], 'substitute')
+
+
 class TruncTests(SimpleTestCase):
     def test_char_columns_keep_full_korean_length(self):
         from api.views.assets import _trunc, _trunc_chars
