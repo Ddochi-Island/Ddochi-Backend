@@ -1972,6 +1972,42 @@ def shed_lookup_teams(request, *args, **kwargs):
 
 @csrf_exempt
 @require_jwt
+def habjaeyang_prior(request, *args, **kwargs):
+    """합재양 작성 중 입력한 번호로 예전에 합재양을 쓴 적 있는 사람인지 — 작성일·인도자·티엠자·재가·마지막 매칭 결과
+    (2026-11-16 사용자 요청, 중섭 확인용). 지금 쓰는 건(excludeId)은 뺌. 막지는 않고 화면에 보여주기만."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    body = _json_body(request)
+    phone = re.sub(r'[^0-9]', '', str(body.get('phone') or ''))
+    if len(phone) < 10:
+        return JsonResponse({'success': True, 'list': []})
+    rows = DataRouterClient().query(
+        """SELECT spi.NAME, s.STAGE, h.APPROVAL_STATUS, h.ROUTE, h.TOOL,
+                  TO_CHAR(h.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DAY,
+                  gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
+                  (SELECT NVL(msrc.LABEL, mrc.LABEL) FROM SARANG_MATCH_HISTORIES smh
+                     LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = smh.RESULT
+                     LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
+                    WHERE smh.SARANG_ID = s.SARANG_ID AND smh.RESULT IS NOT NULL
+                    ORDER BY smh.MATCH_DEGREE DESC, smh.ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY) AS LAST_MATCH
+             FROM SARANG s
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = s.SARANG_ID
+             LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = h.GUIDE_MEMBER_ID
+             LEFT JOIN MEMBERS cm ON cm.MEMBER_ID = h.CALLER_MEMBER_ID
+            WHERE spi.PHONE_NORMALIZED = :1 AND s.DELETED_AT IS NULL AND s.SARANG_ID <> :2
+            ORDER BY h.CREATED_AT DESC FETCH FIRST 5 ROWS ONLY""",
+        [phone, str(body.get('excludeId') or '-')],
+    )
+    return JsonResponse({'success': True, 'list': [{
+        'name': r['name'], 'hjDay': r['hj_day'], 'guide': r['guide_name'], 'tmName': r['caller_name'],
+        'approval': _APPROVAL_KO.get(r['approval_status'], ''), 'stage': r['stage'],
+        'path': (r['route'] or '') + (f"({r['tool']})" if r['tool'] else ''), 'lastMatch': r['last_match'],
+    } for r in rows]})
+
+
+@csrf_exempt
+@require_jwt
 def shed_crm_match(request, *args, **kwargs):
     """홈 합재양 작성(도구노방·사쉐)에서 쓰려는 번호가 합당한 자 CRM(shed로 들어온 사랑이, 합재양 아직 없음)에
     있으면 그 사람 정보를 돌려줌 — 프론트가 "이 분 맞으신가요?"로 확인 후 CRM 건으로 이어 쓰게 해서,
