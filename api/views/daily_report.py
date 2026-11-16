@@ -12,6 +12,7 @@ from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient, DataRouterError
 from api.util.business_date import get_business_date
 from api.views.assets import _member_id_by_name
+from api.views.short_card import _can_edit_journal as _is_own_or_area_lead
 
 logger = logging.getLogger('api.views.daily_report')
 
@@ -59,27 +60,25 @@ def _parse_promo_list(text):
 @csrf_exempt
 @require_jwt
 def daily_report_list_names(request, *args, **kwargs):
-    """보고 대상자 autocomplete 명단 — 작성자와 같은 지역 소속 전원 + 이미 그
-    dateKey에 보고서를 낸 다른 지역 사람(지역장 대리 제출 등 케이스 커버)."""
+    """보고 대상자 autocomplete 명단 — 본인 + (구역장이면) 같은 지역·같은 구역 구역원.
+    대신 쓰기는 구역장만 자기 구역원 것(2026-11-16 사용자 결정, 전엔 같은 지역 전원)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
-    body = _json_body(request)
-    date_key = str(body.get('dateKey') or '').strip() or get_business_date()
-
     client = DataRouterClient()
-    ctx = get_author_context(request.user['sabun'])
+    sabun = request.user['sabun']
     rows = client.query(
         """SELECT DISTINCT m.NAME
              FROM MEMBERS m
-             LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah
-               ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
-             LEFT JOIN DAILY_REPORTS dr
-               ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:1, 'YYYY-MM-DD')
+             JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
             WHERE m.DELETED_AT IS NULL
-              AND (mah.REGION_CODE = :2 OR dr.MEMBER_ID IS NOT NULL)
+              AND (m.MEMBER_ID = :1 OR EXISTS (
+                    SELECT 1 FROM MEMBER_AFFILIATION_HISTORIES me
+                      JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = me.MEMBER_ID AND mpm.POSITION_CODE = 'area_lead'
+                     WHERE me.MEMBER_ID = :2 AND me.IS_CURRENT = 1
+                       AND me.REGION_CODE = mah.REGION_CODE AND me.DISTRICT_CODE = mah.DISTRICT_CODE))
             ORDER BY m.NAME""",
-        [date_key, ctx['team_id']],
+        [sabun, sabun],
     )
     return JsonResponse({'success': True, 'names': [{'name': r['name']} for r in rows]})
 
@@ -167,6 +166,9 @@ def _daily_report(request):
 
     target_ctx = get_author_context(member_id)
     author_sabun = request.user['sabun']
+    # 대신 쓰기는 구역장이 자기 구역원 것만(2026-11-16 사용자 결정 — 전엔 누구나 같은 지역 전원)
+    if not _is_own_or_area_lead(client, author_sabun, member_id):
+        return JsonResponse({'success': False, 'message': '다른 사람 일일보고는 그 사람 구역의 구역장만 대신 쓸 수 있어요!'}, status=403)
 
     def _int(v):
         try:
