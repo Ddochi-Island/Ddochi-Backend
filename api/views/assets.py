@@ -1,6 +1,7 @@
 """assets.js 포팅 대상 — assets 라우트 스텁 (구조만, 로직은 미구현)."""
 import datetime
 import hashlib
+import html
 import json
 import logging
 import random
@@ -16,7 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient, DataRouterError
-from api.telegram.habjaeyang import send_habjaeyang_to_telegram
+from api.telegram.habjaeyang import _build_text as _build_hj_text, _fetch as _fetch_hj, send_habjaeyang_to_telegram
 from api.telegram.matching_dashboard import refresh_matching_dashboard_for_sarang
 from api.telegram.shed_union_dashboards import refresh_shed_sched, refresh_shed_tm, refresh_shed_unified, shed_groups_for_sarang
 from api.telegram.team_stats import refresh_team_stats_for_sarang
@@ -1974,15 +1975,17 @@ def shed_lookup_teams(request, *args, **kwargs):
 @require_jwt
 def habjaeyang_prior(request, *args, **kwargs):
     """합재양 작성 중 입력한 번호로 예전에 합재양을 쓴 적 있는 사람인지 — 작성일·인도자·티엠자·재가·마지막 매칭 결과
-    (2026-11-16 사용자 요청, 중섭 확인용). 지금 쓰는 건(excludeId)은 뺌. 막지는 않고 화면에 보여주기만."""
+    (2026-11-16 사용자 요청, 중섭 확인용). 지금 쓰는 건(excludeId)은 뺌. 막지는 않고 화면에 보여주기만.
+    card는 그때 합재양 본문(텔레그램 카드와 같은 글) — 화면에서 토글로 펼쳐 봄."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     body = _json_body(request)
     phone = re.sub(r'[^0-9]', '', str(body.get('phone') or ''))
     if len(phone) < 10:
         return JsonResponse({'success': True, 'list': []})
-    rows = DataRouterClient().query(
-        """SELECT spi.NAME, s.STAGE, h.APPROVAL_STATUS, h.ROUTE, h.TOOL,
+    client = DataRouterClient()
+    rows = client.query(
+        """SELECT s.SARANG_ID, h.IS_ACTIVE, spi.NAME, s.STAGE, h.APPROVAL_STATUS, h.ROUTE, h.TOOL,
                   TO_CHAR(h.CREATED_AT AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') AS HJ_DAY,
                   gm.NAME AS GUIDE_NAME, cm.NAME AS CALLER_NAME,
                   (SELECT NVL(msrc.LABEL, mrc.LABEL) FROM SARANG_MATCH_HISTORIES smh
@@ -2003,6 +2006,8 @@ def habjaeyang_prior(request, *args, **kwargs):
         'name': r['name'], 'hjDay': r['hj_day'], 'guide': r['guide_name'], 'tmName': r['caller_name'],
         'approval': _APPROVAL_KO.get(r['approval_status'], ''), 'stage': r['stage'],
         'path': (r['route'] or '') + (f"({r['tool']})" if r['tool'] else ''), 'lastMatch': r['last_match'],
+        # 카드 글은 활성 합재양 기준(_fetch) — 비활성(교체된 옛 합재양)이면 본문 없이 요약만
+        'card': html.unescape(_build_hj_text(_fetch_hj(client, r['sarang_id']))) if r['is_active'] == '1' else '',
     } for r in rows]})
 
 
