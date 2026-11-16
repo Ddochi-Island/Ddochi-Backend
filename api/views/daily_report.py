@@ -64,7 +64,8 @@ def daily_report_list_names(request, *args, **kwargs):
     대신 쓰기는 구역장만 자기 구역원 것(2026-11-16 사용자 결정, 전엔 같은 지역 전원).
     그 날짜 보고 상태(none/submitted/final)도 같이 줌 — 구역장 화면의 "우리 구역 오늘 보고" 칸용.
     구역원은 활동(ACTIVE) 회원 중 그 날짜 기준 최근 14일 안에 보고를 낸 적 있는 사람만(2026-11-16 사용자 결정 —
-    보고 안 하는 사람까지 매일 미보고로 잡혀서 챙길 사람이 묻혔음)."""
+    보고 안 하는 사람까지 매일 미보고로 잡혀서 챙길 사람이 묻혔음). 직책(회원 말고)이 있는 사람은 보고가 없어도
+    항상 넣음 — 담당 구역장이 사명자 활동을 올릴 수 있게(2026-11-16)."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -84,10 +85,12 @@ def daily_report_list_names(request, *args, **kwargs):
                       JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = me.MEMBER_ID AND mpm.POSITION_CODE = 'area_lead'
                      WHERE me.MEMBER_ID = :3 AND me.IS_CURRENT = 1
                        AND me.REGION_CODE = mah.REGION_CODE AND me.DISTRICT_CODE = mah.DISTRICT_CODE)
-                   AND EXISTS (
+                   AND (EXISTS (
                     SELECT 1 FROM DAILY_REPORTS r14
                      WHERE r14.MEMBER_ID = m.MEMBER_ID
-                       AND r14.REPORT_DATE BETWEEN TO_DATE(:4, 'YYYY-MM-DD') - 14 AND TO_DATE(:5, 'YYYY-MM-DD'))))
+                       AND r14.REPORT_DATE BETWEEN TO_DATE(:4, 'YYYY-MM-DD') - 14 AND TO_DATE(:5, 'YYYY-MM-DD'))
+                    OR EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS pm
+                                WHERE pm.MEMBER_ID = m.MEMBER_ID AND pm.POSITION_CODE <> 'general'))))
             GROUP BY m.NAME
             ORDER BY m.NAME""",
         [date_key, sabun, sabun, date_key, date_key],
