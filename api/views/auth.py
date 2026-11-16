@@ -28,6 +28,8 @@ def find_user_by_sabun(sabun):
                      FROM MEMBER_POSITION_MAPPINGS mpm
                      JOIN POSITION_CODES pc ON pc.POSITION_CODE = mpm.POSITION_CODE
                     WHERE mpm.MEMBER_ID = m.MEMBER_ID AND pc.DELETED_AT IS NULL
+                      -- 청년회 직책(youth_*)은 표시용 겸직 — 로그인 대표 직책·화면 권한 판정(직책 이름 부분일치)엔 안 씀(2026-11-16)
+                      AND pc.POSITION_CODE NOT LIKE 'youth%'
                     ORDER BY CASE pc.SCOPE WHEN 'global' THEN 0 WHEN 'region' THEN 1 ELSE 2 END
                     FETCH FIRST 1 ROWS ONLY) AS POSITION,
                   (SELECT JSON_ARRAYAGG(jt.PERM RETURNING CLOB)
