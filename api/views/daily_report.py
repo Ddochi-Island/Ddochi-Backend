@@ -33,6 +33,12 @@ _ACTIVITY_KO_TO_CODE = {
 }
 _ACTIVITY_CODE_TO_KO = {v: k for k, v in _ACTIVITY_KO_TO_CODE.items()} | {'offlineSearch': '대면 활동!'}
 
+# 전도팀장 이상 사명자 + 청년회 사명자 — 우리 구역 활동에서 항상 대면으로 고정(2026-11-16 사용자 결정)
+_ALWAYS_FACE_CODES = ('executive', 'region_lead', 'region_general_secretary', 'region_clerk', 'region_mission_clerk',
+                      'team_lead', 'team_evangelist', 'youth_chair', 'youth_general_secretary', 'youth_mission_lead',
+                      'youth_mission_manager', 'youth_mission_clerk', 'youth_mission_sub_clerk', 'youth_visit_secretary')
+_ALWAYS_FACE_SQL = ', '.join(f"'{c}'" for c in _ALWAYS_FACE_CODES)
+
 
 def _json_body(request):
     try:
@@ -74,7 +80,9 @@ def daily_report_list_names(request, *args, **kwargs):
     client = DataRouterClient()
     sabun = request.user['sabun']
     rows = client.query(
-        """SELECT m.NAME, MAX(dr.IS_FINAL) AS IS_FINAL, COUNT(dr.MEMBER_ID) AS REPORTED, MAX(dr.ACTIVITY) AS ACTIVITY
+        f"""SELECT m.NAME, MAX(dr.IS_FINAL) AS IS_FINAL, COUNT(dr.MEMBER_ID) AS REPORTED, MAX(dr.ACTIVITY) AS ACTIVITY,
+                  MAX(CASE WHEN EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS fp WHERE fp.MEMBER_ID = m.MEMBER_ID
+                                         AND fp.POSITION_CODE IN ({_ALWAYS_FACE_SQL})) THEN 1 ELSE 0 END) AS ALWAYS_FACE
              FROM MEMBERS m
              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
              LEFT JOIN DAILY_REPORTS dr ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:1, 'YYYY-MM-DD')
@@ -98,7 +106,8 @@ def daily_report_list_names(request, *args, **kwargs):
     is_area_lead = bool(client.query_one(
         "SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'area_lead'", [sabun]))
     names = [{'name': r['name'], 'status': 'final' if r['is_final'] == '1' else ('submitted' if r['reported'] != '0' else 'none'),
-              'activity': _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else ''}
+              'activity': _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else '',
+              'alwaysFace': r['always_face'] == '1'}
              for r in rows]
     return JsonResponse({'success': True, 'names': names, 'isAreaLead': is_area_lead})
 
