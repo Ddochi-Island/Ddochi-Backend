@@ -665,6 +665,25 @@ def erp_match_list(client, body):
 # ── 텔레그램 다시 올리기(관리자) ──────────────────────────────
 
 @_admin_view
+def erp_activity_roster(client, body):
+    """일일보고 활동자 명단 — 날짜마다 활동 단계(대면/전단지/비대면/대체/미활동)별 이름. 소속은 보고 당시(SNAP_*).
+    옛 오프찾(offlineSearch)은 대면으로 셈(2026-11-16 활동자 기준 변경)."""
+    frm, to = _dates(body)
+    rows = client.query(
+        """SELECT TO_CHAR(dr.REPORT_DATE, 'YYYY-MM-DD') AS DAY, m.NAME,
+                  DECODE(dr.ACTIVITY, 'offlineSearch', 'offline', dr.ACTIVITY) AS ACTIVITY,
+                  dr.SNAP_REGION_CODE AS REGION, dr.SNAP_DISTRICT_CODE AS DISTRICT
+             FROM DAILY_REPORTS dr JOIN MEMBERS m ON m.MEMBER_ID = dr.MEMBER_ID
+            WHERE dr.REPORT_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
+            ORDER BY dr.REPORT_DATE DESC, dr.SNAP_REGION_CODE, dr.SNAP_DISTRICT_CODE, m.NAME""",
+        [frm.isoformat(), to.isoformat()],
+        fetch_limit=20000,
+    )
+    return {'rows': [{'day': r['day'], 'name': r['name'], 'activity': r['activity'], 'region': r['region'], 'district': r['district']}
+                     for r in rows]}
+
+
+@_admin_view
 def erp_telegram_refresh(client, body):
     """DB에서 이미 재가/반려된 건의 텔레그램 카드·현황판만 다시 올림(처리는 다시 안 함).
     텔레그램 갱신이 실패했던 건(봇이 방에 못 닿던 경우 등)을 맞출 때."""
