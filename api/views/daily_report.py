@@ -61,26 +61,35 @@ def _parse_promo_list(text):
 @require_jwt
 def daily_report_list_names(request, *args, **kwargs):
     """보고 대상자 autocomplete 명단 — 본인 + (구역장이면) 같은 지역·같은 구역 구역원.
-    대신 쓰기는 구역장만 자기 구역원 것(2026-11-16 사용자 결정, 전엔 같은 지역 전원)."""
+    대신 쓰기는 구역장만 자기 구역원 것(2026-11-16 사용자 결정, 전엔 같은 지역 전원).
+    그 날짜 보고 상태(none/submitted/final)도 같이 줌 — 구역장 화면의 "우리 구역 오늘 보고" 칸용."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
+    body = _json_body(request)
+    date_key = str(body.get('dateKey') or '').strip() or get_business_date()
     client = DataRouterClient()
     sabun = request.user['sabun']
     rows = client.query(
-        """SELECT DISTINCT m.NAME
+        """SELECT m.NAME, MAX(dr.IS_FINAL) AS IS_FINAL, COUNT(dr.MEMBER_ID) AS REPORTED
              FROM MEMBERS m
              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
+             LEFT JOIN DAILY_REPORTS dr ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:1, 'YYYY-MM-DD')
             WHERE m.DELETED_AT IS NULL
-              AND (m.MEMBER_ID = :1 OR EXISTS (
+              AND (m.MEMBER_ID = :2 OR EXISTS (
                     SELECT 1 FROM MEMBER_AFFILIATION_HISTORIES me
                       JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = me.MEMBER_ID AND mpm.POSITION_CODE = 'area_lead'
-                     WHERE me.MEMBER_ID = :2 AND me.IS_CURRENT = 1
+                     WHERE me.MEMBER_ID = :3 AND me.IS_CURRENT = 1
                        AND me.REGION_CODE = mah.REGION_CODE AND me.DISTRICT_CODE = mah.DISTRICT_CODE))
+            GROUP BY m.NAME
             ORDER BY m.NAME""",
-        [sabun, sabun],
+        [date_key, sabun, sabun],
     )
-    return JsonResponse({'success': True, 'names': [{'name': r['name']} for r in rows]})
+    is_area_lead = bool(client.query_one(
+        "SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'area_lead'", [sabun]))
+    names = [{'name': r['name'], 'status': 'final' if r['is_final'] == '1' else ('submitted' if r['reported'] != '0' else 'none')}
+             for r in rows]
+    return JsonResponse({'success': True, 'names': names, 'isAreaLead': is_area_lead})
 
 
 @csrf_exempt
