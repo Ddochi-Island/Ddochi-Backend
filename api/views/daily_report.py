@@ -12,7 +12,6 @@ from api.auth.gate import get_author_context, require_jwt
 from api.clients.data_router import DataRouterClient, DataRouterError
 from api.util.business_date import get_business_date
 from api.views.assets import _member_id_by_name
-from api.views.short_card import _can_edit_journal as _is_own_or_area_lead
 
 logger = logging.getLogger('api.views.daily_report')
 
@@ -64,14 +63,48 @@ def _parse_promo_list(text):
     return items
 
 
+def _proxy_scope(client, sabun):
+    """일일보고 대신 쓰기 범위 — ('region', 지역, 구역) 지역부전서 / ('district', ...) 구역장 / (None, ...) 본인만.
+    둘 다면 넓은 쪽(지역). 2026-11-17 사용자 결정(지역부전서도 "우리 지역 활동")."""
+    rows = client.query(
+        """SELECT mah.REGION_CODE, mah.DISTRICT_CODE, mpm.POSITION_CODE
+             FROM MEMBER_AFFILIATION_HISTORIES mah
+             LEFT JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = mah.MEMBER_ID
+            WHERE mah.MEMBER_ID = :1 AND mah.IS_CURRENT = 1""",
+        [sabun],
+    )
+    if not rows:
+        return None, None, None
+    codes = {r['position_code'] for r in rows}
+    region, district = rows[0]['region_code'], rows[0]['district_code']
+    if 'team_mission_clerk' in codes:
+        return 'region', region, district
+    if 'area_lead' in codes:
+        return 'district', region, district
+    return None, region, district
+
+
+def _can_proxy(client, sabun, member_id):
+    """본인 것이거나, 대신 쓰기 범위(_proxy_scope) 안 사람 것."""
+    if member_id == sabun:
+        return True
+    scope, region, district = _proxy_scope(client, sabun)
+    if not scope:
+        return False
+    t = client.query_one(
+        "SELECT REGION_CODE, DISTRICT_CODE FROM MEMBER_AFFILIATION_HISTORIES WHERE MEMBER_ID = :1 AND IS_CURRENT = 1", [member_id])
+    if not t or t['region_code'] != region:
+        return False
+    return scope == 'region' or t['district_code'] == district
+
+
 @csrf_exempt
 @require_jwt
 def daily_report_list_names(request, *args, **kwargs):
-    """보고 대상자 autocomplete 명단 — 본인 + (구역장이면) 같은 지역·같은 구역 구역원.
-    대신 쓰기는 구역장만 자기 구역원 것(2026-11-16 사용자 결정, 전엔 같은 지역 전원).
-    그 날짜 보고 상태(none/submitted/final)도 같이 줌 — 구역장 화면의 "우리 구역 오늘 보고" 칸용.
-    구역원은 활동(ACTIVE) 회원 중 직책(회원 말고)이 있는 사람만 고정으로 — 직책이 회원뿐인 사람은 안 띄움
-    (2026-11-16 사용자 결정, 전엔 최근 14일 보고자). 대신 쓰기 권한(_is_own_or_area_lead)은 구역원 전원 그대로."""
+    """보고 대상자 autocomplete 명단 — 본인 + 대신 쓰기 범위(_proxy_scope)의 사람들.
+    구역장은 같은 구역, 지역부전서는 같은 지역 전체(2026-11-17 사용자 결정 — "우리 지역 활동").
+    그 날짜 보고 상태(none/submitted/final)·활동도 같이 줌 — 일일보고 화면의 "우리 구역/지역 활동·보고" 칸용.
+    고정 명단은 활동(ACTIVE) 회원 중 직책(회원 말고)이 있는 사람만, 직책이 회원뿐인 사람은 others("구역원 추가" 후보)로."""
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
 
@@ -79,50 +112,38 @@ def daily_report_list_names(request, *args, **kwargs):
     date_key = str(body.get('dateKey') or '').strip() or get_business_date()
     client = DataRouterClient()
     sabun = request.user['sabun']
+    scope, region, district = _proxy_scope(client, sabun)
+    if scope == 'region':
+        in_scope, scope_args = 'mah.REGION_CODE = :3', [region]
+    elif scope == 'district':
+        in_scope, scope_args = 'mah.REGION_CODE = :3 AND mah.DISTRICT_CODE = :4', [region, district]
+    else:
+        in_scope, scope_args = '1 = 0', []
     rows = client.query(
-        f"""SELECT m.NAME, MAX(dr.IS_FINAL) AS IS_FINAL, COUNT(dr.MEMBER_ID) AS REPORTED, MAX(dr.ACTIVITY) AS ACTIVITY,
+        f"""SELECT m.NAME, mah.DISTRICT_CODE AS DISTRICT, MAX(dr.IS_FINAL) AS IS_FINAL, COUNT(dr.MEMBER_ID) AS REPORTED,
+                  MAX(dr.ACTIVITY) AS ACTIVITY,
+                  MAX(CASE WHEN m.MEMBER_ID = :1 OR EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS pm
+                           WHERE pm.MEMBER_ID = m.MEMBER_ID AND pm.POSITION_CODE <> 'general') THEN 1 ELSE 0 END) AS FIXED,
                   MAX(CASE WHEN EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS fp WHERE fp.MEMBER_ID = m.MEMBER_ID
                                          AND fp.POSITION_CODE IN ({_ALWAYS_FACE_SQL})) THEN 1 ELSE 0 END) AS ALWAYS_FACE
              FROM MEMBERS m
              JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
-             LEFT JOIN DAILY_REPORTS dr ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:1, 'YYYY-MM-DD')
+             LEFT JOIN DAILY_REPORTS dr ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:2, 'YYYY-MM-DD')
             WHERE m.DELETED_AT IS NULL
-              AND (m.MEMBER_ID = :2 OR (m.STATUS = 'ACTIVE'
-                   AND EXISTS (
-                    SELECT 1 FROM MEMBER_AFFILIATION_HISTORIES me
-                      JOIN MEMBER_POSITION_MAPPINGS mpm ON mpm.MEMBER_ID = me.MEMBER_ID AND mpm.POSITION_CODE = 'area_lead'
-                     WHERE me.MEMBER_ID = :3 AND me.IS_CURRENT = 1
-                       AND me.REGION_CODE = mah.REGION_CODE AND me.DISTRICT_CODE = mah.DISTRICT_CODE)
-                   AND EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS pm
-                                WHERE pm.MEMBER_ID = m.MEMBER_ID AND pm.POSITION_CODE <> 'general')))
-            GROUP BY m.NAME
+              AND ((m.STATUS = 'ACTIVE' AND {in_scope}) OR m.MEMBER_ID = :{len(scope_args) + 3})  -- 바인드는 나온 순서대로 번호
+            GROUP BY m.NAME, mah.DISTRICT_CODE
             ORDER BY m.NAME""",
-        [date_key, sabun, sabun],
+        [sabun, date_key, *scope_args, sabun],
     )
-    is_area_lead = bool(client.query_one(
-        "SELECT 1 AS OK FROM MEMBER_POSITION_MAPPINGS WHERE MEMBER_ID = :1 AND POSITION_CODE = 'area_lead'", [sabun]))
-    names = [{'name': r['name'], 'status': 'final' if r['is_final'] == '1' else ('submitted' if r['reported'] != '0' else 'none'),
-              'activity': _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else '',
-              'alwaysFace': r['always_face'] == '1'}
-             for r in rows]
-    # 구역장용 "구역원 추가" 후보 — 같은 구역의 직책이 회원뿐인 활동 회원(명단엔 안 뜸). 그날 활동이 이미 있으면
-    # 화면이 처음부터 담아 둠(2026-11-16)
-    others = []
-    if is_area_lead:
-        shown = {r['name'] for r in rows}
-        others = [{'name': r['name'], 'activity': _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else ''}
-                  for r in client.query(
-                      """SELECT m.NAME, MAX(dr.ACTIVITY) AS ACTIVITY
-                           FROM MEMBERS m
-                           JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = m.MEMBER_ID AND mah.IS_CURRENT = 1
-                           JOIN MEMBER_AFFILIATION_HISTORIES me ON me.MEMBER_ID = :1 AND me.IS_CURRENT = 1
-                                AND me.REGION_CODE = mah.REGION_CODE AND me.DISTRICT_CODE = mah.DISTRICT_CODE
-                           LEFT JOIN DAILY_REPORTS dr ON dr.MEMBER_ID = m.MEMBER_ID AND dr.REPORT_DATE = TO_DATE(:2, 'YYYY-MM-DD')
-                          WHERE m.DELETED_AT IS NULL AND m.STATUS = 'ACTIVE'
-                          GROUP BY m.NAME ORDER BY m.NAME""",
-                      [sabun, date_key],
-                  ) if r['name'] not in shown]
-    return JsonResponse({'success': True, 'names': names, 'isAreaLead': is_area_lead, 'others': others})
+    act = lambda r: _ACTIVITY_CODE_TO_KO.get(r['activity'], '') if r['activity'] else ''
+    names = [{'name': r['name'], 'district': r['district'],
+              'status': 'final' if r['is_final'] == '1' else ('submitted' if r['reported'] != '0' else 'none'),
+              'activity': act(r), 'alwaysFace': r['always_face'] == '1'}
+             for r in rows if r['fixed'] == '1']
+    # "구역원 추가" 후보 — 범위 안의 직책이 회원뿐인 활동 회원(고정 명단엔 안 뜸). 그날 활동이 이미 있으면 화면이 처음부터 담아 둠
+    others = [{'name': r['name'], 'district': r['district'], 'activity': act(r)} for r in rows if r['fixed'] != '1']
+    return JsonResponse({'success': True, 'names': names, 'others': others, 'scope': scope,
+                         'isAreaLead': bool(scope)})  # isAreaLead: 예전 화면 호환(대신 쓰기 범위가 있으면 true)
 
 
 @csrf_exempt
@@ -211,9 +232,9 @@ def _daily_report(request):
 
     target_ctx = get_author_context(member_id)
     author_sabun = request.user['sabun']
-    # 대신 쓰기는 구역장이 자기 구역원 것만(2026-11-16 사용자 결정 — 전엔 누구나 같은 지역 전원)
-    if not _is_own_or_area_lead(client, author_sabun, member_id):
-        return JsonResponse({'success': False, 'message': '다른 사람 일일보고는 그 사람 구역의 구역장만 대신 쓸 수 있어요!'}, status=403)
+    # 대신 쓰기는 구역장이 자기 구역원 것, 지역부전서가 자기 지역 사람 것만(2026-11-16·17 사용자 결정 — 전엔 누구나 같은 지역 전원)
+    if not _can_proxy(client, author_sabun, member_id):
+        return JsonResponse({'success': False, 'message': '다른 사람 일일보고는 그 사람 구역의 구역장이나 지역의 지역부전서만 대신 쓸 수 있어요!'}, status=403)
 
     def _int(v):
         try:
@@ -282,7 +303,7 @@ def daily_report_activities(request, *args, **kwargs):
         name = str(it.get('name') or '').strip()
         code = _ACTIVITY_KO_TO_CODE.get(str(it.get('activity') or '').strip())
         member_id = _member_id_by_name(client, name) if name and code else None
-        if not member_id or not _is_own_or_area_lead(client, sabun, member_id):
+        if not member_id or not _can_proxy(client, sabun, member_id):
             skipped.append(name)
             continue
         ctx = get_author_context(member_id)
