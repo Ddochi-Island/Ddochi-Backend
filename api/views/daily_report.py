@@ -139,9 +139,11 @@ def daily_report_list_names(request, *args, **kwargs):
     names = [{'name': r['name'], 'district': r['district'],
               'status': 'final' if r['is_final'] == '1' else ('submitted' if r['reported'] != '0' else 'none'),
               'activity': act(r), 'alwaysFace': r['always_face'] == '1'}
-             for r in rows if r['fixed'] == '1']
+             for r in rows if r['fixed'] == '1' or scope == 'region']
     # "구역원 추가" 후보 — 범위 안의 직책이 회원뿐인 활동 회원(고정 명단엔 안 뜸). 그날 활동이 이미 있으면 화면이 처음부터 담아 둠
-    others = [{'name': r['name'], 'district': r['district'], 'activity': act(r)} for r in rows if r['fixed'] != '1']
+    # 지역부전서(지역 범위)는 지역 안 활동 회원 전원을 고정 명단으로 — 추가 후보 없음(2026-11-18 사용자 결정)
+    others = [{'name': r['name'], 'district': r['district'], 'activity': act(r)}
+              for r in rows if r['fixed'] != '1' and scope != 'region']
     return JsonResponse({'success': True, 'names': names, 'others': others, 'scope': scope,
                          'isAreaLead': bool(scope)})  # isAreaLead: 예전 화면 호환(대신 쓰기 범위가 있으면 true)
 
