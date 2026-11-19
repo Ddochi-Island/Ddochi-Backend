@@ -633,12 +633,17 @@ def _match_summary(matches, scheduled_at):
     consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
 
     def label(r):
-        """결과 라벨 — 취소·비합·탈락·밀림은 세부 사유를 괄호로(예: 취소(경계취소), 밀림(교사못구함), 2026-11-20 사용자 결정)"""
+        """결과 라벨 — 취소·비합·탈락은 세부 사유를, 밀림은 사유와 밀린 날짜를 괄호로(예: 취소(경계취소), 밀림(교사못구함·11/24), 2026-11-20 사용자 결정)"""
         if not r:
             return ''
         base = r.get('result_label') or ''
         sub = r.get('sub_reason_label')
-        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT', 'DELAY') else base
+        if r.get('result') == 'DELAY':  # 밀림은 언제로 밀렸는지(같은 차수 다음 시도 날짜)도 — 밀림(교사못구함·11/24), 날짜 없으면 미정
+            nxt = next((x for x in matches if x['match_degree'] == r['match_degree']
+                        and int(x['attempt_count'] or 0) == int(r['attempt_count'] or 0) + 1), None)
+            when = _md(nxt['matched_at']) if nxt and nxt.get('matched_at') else '미정'
+            return f"{base}({sub + '·' if sub else ''}{when})"
+        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base
 
     def or_delay(r, d):
         """결과 전인 시도면 같은 차수의 마지막 밀림을 대신 — 밀린 채 다음 날짜를 기다리는 중임을 보여줌"""
