@@ -617,6 +617,12 @@ def _hap_date(hap_at):
     return (datetime.datetime.fromisoformat(hap_at.replace('Z', '+00:00')) + datetime.timedelta(hours=9)).date().isoformat()
 
 
+# 청년회장·청년회전도부장·수지역장·전도교관·지역총무가 교사인 건은 교사 소속을 인도 소속으로 잡음
+# (그분들 본인 구역이 아니라 인도한 쪽 실적으로 — 2026-11-20 사용자 결정)
+_TEACHER_AS_GUIDE_CODES = ('youth_chair', 'youth_mission_head', 'executive', 'region_lead', 'region_general_secretary')
+_TEACHER_AS_GUIDE_SQL = ', '.join(f"'{c}'" for c in _TEACHER_AS_GUIDE_CODES)
+
+
 @_admin_view
 def erp_match_list(client, body):
     """재가된 사람 — 합당한자 날짜(_hap_date: 재가한 날) 기준 기간 안.
@@ -629,7 +635,9 @@ def erp_match_list(client, body):
         SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.RECRUITMENT_TYPE, {hap_at} AS HAP_AT,
                h.ROUTE, h.TOOL, h.MATCH_SCHEDULED_AT,
                gm.NAME AS GUIDE_NAME, gmah.REGION_CODE AS GUIDE_REGION, gmah.DISTRICT_CODE AS GUIDE_DISTRICT,
-               COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, tmah.REGION_CODE AS TEACHER_REGION, tmah.DISTRICT_CODE AS TEACHER_DISTRICT
+               COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, tmah.REGION_CODE AS TEACHER_REGION, tmah.DISTRICT_CODE AS TEACHER_DISTRICT,
+               CASE WHEN EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS tp WHERE tp.MEMBER_ID = h.TEACHER_MEMBER_ID
+                                  AND tp.POSITION_CODE IN ({_TEACHER_AS_GUIDE_SQL})) THEN 1 ELSE 0 END AS TEACHER_AS_GUIDE
           FROM SARANG s
           JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
           JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = s.SARANG_ID AND h.IS_ACTIVE = 1
@@ -656,6 +664,8 @@ def erp_match_list(client, body):
             groups[(g['region_code'], d.strip())] = g['group_name']
     for r in rows:
         r.update(_match_summary(matches.get(r['sarang_id'], []), r.pop('match_scheduled_at')))
+        if r.pop('teacher_as_guide') == '1':  # 윗선 사명자가 교사면 교사 소속 = 인도 소속
+            r['teacher_region'], r['teacher_district'] = r['guide_region'], r['guide_district']
         r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
         r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
         r['hap_date'] = _hap_date(r['hap_at'])
