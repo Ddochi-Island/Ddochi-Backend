@@ -671,8 +671,8 @@ def _hap_date(hap_at):
     return (datetime.datetime.fromisoformat(hap_at.replace('Z', '+00:00')) + datetime.timedelta(hours=9)).date().isoformat()
 
 
-# 청년회장·청년회전도부장·수지역장·전도교관·지역총무가 교사인 건은 교사 소속을 인도 소속으로 잡음
-# (그분들 본인 구역이 아니라 인도한 쪽 실적으로 — 2026-11-20 사용자 결정)
+# 청년회장·청년회전도부장·수지역장·전도교관·지역총무가 교사인 건은 인도·교사를 맞바꿔 보여줌(이름·소속 모두) —
+# 사명자를 인도자로, 원래 인도자를 교사로 셈(2026-11-20 사용자 결정, 처음엔 교사 소속만 인도 소속으로 했다가 바꿈)
 _TEACHER_AS_GUIDE_CODES = ('youth_chair', 'youth_mission_head', 'executive', 'region_lead', 'region_general_secretary')
 _TEACHER_AS_GUIDE_SQL = ', '.join(f"'{c}'" for c in _TEACHER_AS_GUIDE_CODES)
 
@@ -720,8 +720,10 @@ def erp_match_list(client, body):
             groups[(g['region_code'], d.strip())] = g['group_name']
     for r in rows:
         r.update(_match_summary(matches.get(r['sarang_id'], []), r.pop('match_scheduled_at')))
-        if r.pop('teacher_as_guide') == '1':  # 윗선 사명자가 교사면 교사 소속 = 인도 소속
-            r['teacher_region'], r['teacher_district'] = r['guide_region'], r['guide_district']
+        if r.pop('teacher_as_guide') == '1':  # 윗선 사명자가 교사면 인도·교사를 맞바꿈(이름·소속 모두) — 사명자를 인도자로
+            r['guide_name'], r['teacher_name'] = r['teacher_name'], r['guide_name']
+            r['guide_region'], r['teacher_region'] = r['teacher_region'], r['guide_region']
+            r['guide_district'], r['teacher_district'] = r['teacher_district'], r['guide_district']
         r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
         r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
         r['hap_date'] = _hap_date(r['hap_at'])
