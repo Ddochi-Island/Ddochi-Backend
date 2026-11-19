@@ -604,6 +604,9 @@ def _match_summary(matches, scheduled_at):
     top = max((int(r['match_degree'] or 0) for r in matches), default=0)
     later = last([r for r in matches if int(r['match_degree'] or 0) == top]) if top > 1 else None
     consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
+    # 취소·비합 사유 — 가장 마지막 시도가 취소/비합으로 끝났으면 그 세부 사유(경계취소·환경비합 등, 2026-11-20)
+    latest = max(matches, key=lambda r: (int(r['match_degree'] or 0), int(r['attempt_count'] or 0)), default=None)
+    end = latest if latest and latest['result'] in ('CANCEL', 'UNFIT') else None
     return {
         'first_at': (first or {}).get('matched_at') or scheduled_at,
         'first_result': (first or {}).get('result_label') or '',
@@ -611,6 +614,7 @@ def _match_summary(matches, scheduled_at):
         'consult_at': min(consult) if consult else None,
         # 지금 만남 단계 — 가장 높은 차수(2차만남으로 넘어가면 2차). 매칭 이력이 아직 없으면 1차(만남 예정)
         'meet_stage': f'{max(top, 1)}차',
+        'end_reason': ((end.get('sub_reason_label') or end.get('result_label')) if end else '') or '',
     }
 
 
@@ -654,8 +658,10 @@ def erp_match_list(client, body):
     for i in range(0, len(ids), 500):  # IN 목록 1000개 한도
         chunk = ids[i:i + 500]
         for m in client.query(
-            f"""SELECT mh.SARANG_ID, mh.MATCH_DEGREE, mh.ATTEMPT_COUNT, mh.MATCHED_AT, mh.RESULT, mrc.LABEL AS RESULT_LABEL
+            f"""SELECT mh.SARANG_ID, mh.MATCH_DEGREE, mh.ATTEMPT_COUNT, mh.MATCHED_AT, mh.RESULT, mrc.LABEL AS RESULT_LABEL,
+                       msrc.LABEL AS SUB_REASON_LABEL
                   FROM SARANG_MATCH_HISTORIES mh LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = mh.RESULT
+                  LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = mh.RESULT AND msrc.SUB_CODE = mh.SUB_REASON
                  WHERE mh.SARANG_ID IN ({', '.join(f':{j + 1}' for j in range(len(chunk)))})""",
                 chunk, fetch_limit=50000):
             matches.setdefault(m['sarang_id'], []).append(m)
