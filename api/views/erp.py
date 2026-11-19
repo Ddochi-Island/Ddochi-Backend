@@ -603,7 +603,7 @@ def _md(at):
 
 
 def _with_second_date(text, first, second):
-    """최초 결과가 2차만남이면 단기/장기와 2차 만남 날짜를 괄호로(예: 2차만남(단기·11/24), 날짜가 아직 없으면 2차만남(미정)).
+    """최초 결과가 2차만남이면 단기/장기와 2차 만남 날짜를 괄호로(예: 2차만남(단기 - 11/24), 날짜가 아직 없으면 2차만남(미정)).
     단기/장기는 1차 만남 날 → 2차 만남 날 간격(_SHORT_SECOND_DAYS) — 2026-11-20 사용자 요청."""
     if not first or first.get('result') != 'SECOND_MEET':
         return text
@@ -614,7 +614,7 @@ def _with_second_date(text, first, second):
     if not one:
         return f'{text}({_md(at)})'
     gap = (datetime.date.fromisoformat(at[:10]) - datetime.date.fromisoformat(one[:10])).days
-    return f"{text}({'단기' if gap <= _SHORT_SECOND_DAYS else '장기'}·{_md(at)})"
+    return f"{text}({'단기' if gap <= _SHORT_SECOND_DAYS else '장기'} - {_md(at)})"
 
 
 def _match_summary(matches, scheduled_at):
