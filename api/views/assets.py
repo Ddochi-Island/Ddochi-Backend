@@ -280,7 +280,7 @@ def get_assets(request, *args, **kwargs):
         for i, r in enumerate(hist_rows):
             if not r['result']:
                 continue
-            detail = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason_label'] or r['result_label']}"
+            detail = _outcome_text(r, with_delay_reason=True)
             if r['result'] in ('DELAY', 'SECOND_MEET'):
                 nxt = hist_rows[i + 1] if i + 1 < len(hist_rows) else None
                 if nxt:
@@ -297,14 +297,14 @@ def get_assets(request, *args, **kwargs):
         latest = hist[-1] if hist else None
         match_result_detail = ''
         if latest and latest['result']:
-            match_result_detail = f"{_MATCH_RESULT_ICON.get(latest['result'], '')}{latest['sub_reason_label'] or latest['result_label']}"
+            match_result_detail = _outcome_text(latest)
 
         meetings = [{
             'meetingId': m['match_id'],
             'date': m['mt_date'] or '미정',
             'time': m['mt_time'] or '',
             'place': m['match_location'] or '',
-            'outcome': (f"{_MATCH_RESULT_ICON.get(m['result'], '')}{m['sub_reason_label'] or m['result_label']}") if m['result'] else None,
+            'outcome': _outcome_text(m) if m['result'] else None,
             'attended': None,
             # 직전 시도가 2차만남으로 넘어간 결과였으면 이 만남이 바로 그 2차만남 자리.
             'isSecondMeet': bool(i > 0 and hist[i - 1]['result'] == 'SECOND_MEET'),
@@ -441,7 +441,7 @@ def get_matching_history(request, *args, **kwargs):
     for r in rows:
         outcome = ''
         if r['result']:
-            outcome = f"{_MATCH_RESULT_ICON.get(r['result'], '')}{r['sub_reason_label'] or r['result_label']}"
+            outcome = _outcome_text(r)
         meetings.append({
             'meetingId': r['match_id'],
             'date': r['mt_date'] or '',
@@ -483,6 +483,16 @@ def search_prospects(request, *args, **kwargs):
     if request.method not in ['POST']:
         return JsonResponse({"error": "method_not_allowed"}, status=405)
     return JsonResponse({"error": "not_implemented", "source": "services/main/src/routes/assets.js"}, status=501)
+
+
+def _outcome_text(r, with_delay_reason=False):
+    """매칭 결과 표시 문구 — 사유가 있으면 사유(❌경계취소). 밀림은 화면이 '❌밀림' 문구로 카드를 나누니(MatchingScreen
+    POSTPONE_MARKERS) 그대로 두고, 로그 줄에서만 사유를 괄호로(❌밀림(교사못구함)) — 2026-11-20 밀림 사유 추가."""
+    icon = _MATCH_RESULT_ICON.get(r['result'], '')
+    if r['result'] == 'DELAY':
+        sub = r.get('sub_reason_label')
+        return f"{icon}{r['result_label']}" + (f'({sub})' if with_delay_reason and sub else '')
+    return f"{icon}{r['sub_reason_label'] or r['result_label']}"
 
 
 # 프론트가 보내는 한글 세부사유(reasonType) → (MATCH_RESULT_CODES.RESULT_CODE,

@@ -94,7 +94,10 @@ def _outcome(row, next_row):
     안 만난) 행은 준비완료/교사구함 같은 문구 없이 빈칸으로 둠."""
     if not row['result']:
         return ''
-    text = f"{_MATCH_RESULT_ICON.get(row['result'], '')}{row['sub_reason_label'] or row['result_label']}"
+    # 밀림은 '밀림(사유)'로 — 사유만 쓰면 밀림인지 안 보여서(2026-11-20 밀림 사유 추가)
+    reason = (f"{row['result_label']}({row['sub_reason_label']})" if row['sub_reason_label'] else row['result_label']) \
+        if row['result'] == 'DELAY' else (row['sub_reason_label'] or row['result_label'])
+    text = f"{_MATCH_RESULT_ICON.get(row['result'], '')}{reason}"
     if row['result'] in _RESCHEDULE_RESULTS:
         text += f" ({_fmt_md(next_row['mt_date'] if next_row else None)})"
     return text
