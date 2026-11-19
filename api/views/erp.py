@@ -594,7 +594,7 @@ def erp_find_list(client, body):
 
 # ── 매칭 명단(관리자) ──────────────────────────────
 
-_SHORT_SECOND_DAYS = 3  # 1차 → 2차 만남 간격이 이 일수 이하면 단기, 넘으면 장기(2026-11-20 사용자 결정)
+_SHORT_DAYS = 3  # 다음 만남까지 이 일수 이하면 단기, 넘으면 장기 — 2차만남·밀림 공통(2026-11-20 사용자 결정, 화면에서 날짜 색으로)
 
 
 def _md(at):
@@ -602,25 +602,28 @@ def _md(at):
     return f'{int(at[5:7])}/{int(at[8:10])}'
 
 
-def _with_second_date(text, first, second):
-    """최초 결과가 2차만남이면 단기/장기와 2차 만남 날짜를 괄호로(예: 2차만남(단기 - 11/24), 날짜가 아직 없으면 2차만남(미정)).
-    단기/장기는 1차 만남 날 → 2차 만남 날 간격(_SHORT_SECOND_DAYS) — 2026-11-20 사용자 요청."""
+def _term(frm, to):
+    """두 MATCHED_AT 사이가 _SHORT_DAYS 이하면 '단기', 넘으면 '장기'. 날짜가 하나라도 없으면 ''."""
+    if not frm or not to:
+        return ''
+    gap = (datetime.date.fromisoformat(to[:10]) - datetime.date.fromisoformat(frm[:10])).days
+    return '단기' if gap <= _SHORT_DAYS else '장기'
+
+
+def _with_second_date(res, first, second):
+    """최초 결과가 2차만남이면 2차 만남 날짜를 괄호로(예: 2차만남(11/24), 날짜가 아직 없으면 2차만남(미정)).
+    단기/장기(1차 만남 날 → 2차 만남 날)는 글자 대신 term으로 — 화면이 날짜 색으로 구분. res = (글자, term)."""
     if not first or first.get('result') != 'SECOND_MEET':
-        return text
+        return res
     at = (second or {}).get('matched_at')
-    if not at:
-        return f'{text}(미정)'
-    one = first.get('matched_at')
-    if not one:
-        return f'{text}({_md(at)})'
-    gap = (datetime.date.fromisoformat(at[:10]) - datetime.date.fromisoformat(one[:10])).days
-    return f"{text}({'단기' if gap <= _SHORT_SECOND_DAYS else '장기'} - {_md(at)})"
+    return (f"{res[0]}({_md(at) if at else '미정'})", _term(first.get('matched_at'), at))
 
 
 def _match_summary(matches, scheduled_at):
     """한 사람의 매칭 이력(MATCH_DEGREE·ATTEMPT_COUNT·MATCHED_AT·RESULT 라벨) → 시트 열.
     최초만남 = 1차의 마지막 시도(밀림이면 다음 시도로 넘어감), 이후만남 = 가장 높은 차수(2차 이상)의 마지막 시도.
     마지막 시도가 아직 결과 전인데 그 차수에서 밀린 적이 있으면 마지막 밀림(사유)을 보여줌.
+    결과마다 *_term(단기/장기, 밀림·2차만남만)을 같이 줌 — 화면이 괄호 속 날짜 색으로 구분.
     매칭 이력이 아직 없으면 합재양의 만남 예정일."""
     def last(rows):
         return max(rows, key=lambda r: int(r['attempt_count'] or 0)) if rows else None
@@ -633,27 +636,30 @@ def _match_summary(matches, scheduled_at):
     consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
 
     def label(r):
-        """결과 라벨 — 취소·비합·탈락은 세부 사유를, 밀림은 사유와 밀린 날짜를 괄호로(예: 취소(경계취소), 밀림(교사못구함 - 11/24), 2026-11-20 사용자 결정)"""
+        """결과 라벨과 term — 취소·비합·탈락은 세부 사유를, 밀림은 사유와 밀린 날짜를 괄호로
+        (예: 취소(경계취소), 밀림(교사못구함 - 11/24), 2026-11-20 사용자 결정). 밀림 term은 밀린 만남 날 → 다음 날."""
         if not r:
-            return ''
+            return '', ''
         base = r.get('result_label') or ''
         sub = r.get('sub_reason_label')
-        if r.get('result') == 'DELAY':  # 밀림은 언제로 밀렸는지(같은 차수 다음 시도 날짜)도 — 밀림(교사못구함 - 11/24), 날짜 없으면 미정
+        if r.get('result') == 'DELAY':  # 밀림은 언제로 밀렸는지(같은 차수 다음 시도 날짜)도, 날짜 없으면 미정
             nxt = next((x for x in matches if x['match_degree'] == r['match_degree']
                         and int(x['attempt_count'] or 0) == int(r['attempt_count'] or 0) + 1), None)
-            when = _md(nxt['matched_at']) if nxt and nxt.get('matched_at') else '미정'
-            return f"{base}({sub + ' - ' if sub else ''}{when})"
-        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base
+            at = (nxt or {}).get('matched_at')
+            return f"{base}({sub + ' - ' if sub else ''}{_md(at) if at else '미정'})", _term(r.get('matched_at'), at)
+        return (f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base), ''
 
     def or_delay(r, d):
         """결과 전인 시도면 같은 차수의 마지막 밀림을 대신 — 밀린 채 다음 날짜를 기다리는 중임을 보여줌"""
         if r and r.get('result'):
             return label(r)
         return label(last([x for x in degree(d) if x['result'] == 'DELAY']))
+    first_res = _with_second_date(or_delay(first, 1), first, last(degree(2)))
+    later_res = or_delay(later, top)
     return {
         'first_at': (first or {}).get('matched_at') or scheduled_at,
-        'first_result': _with_second_date(or_delay(first, 1), first, last(degree(2))),
-        'later_result': or_delay(later, top) or ('진행 예정' if later else ''),
+        'first_result': first_res[0], 'first_term': first_res[1],
+        'later_result': later_res[0] or ('진행 예정' if later else ''), 'later_term': later_res[1],
         'consult_at': min(consult) if consult else None,
         # 지금 만남 단계 — 가장 높은 차수(2차만남으로 넘어가면 2차). 매칭 이력이 아직 없으면 1차(만남 예정)
         'meet_stage': f'{max(top, 1)}차',
