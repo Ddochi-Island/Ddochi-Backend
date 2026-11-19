@@ -9,8 +9,8 @@ logger = logging.getLogger('tel_router.match_result_cmd')
 
 CMD_RE = re.compile(r'^/r_([0-9a-fA-F]{8})(?:@\S+)?\s*$')
 NAME_RE = re.compile(r'^/r(?:@\S+)?(?:\s+(\S+))?\s*$')  # "/r 섭외자" — 이름으로(그 방 지역에서 main이 찾음)
-# main이 날짜 안내 메시지 끝에 붙이는 꼬리표(#r_<8자리><D|S>) — 답장이 어느 건/어느 결과인지 상태 없이 알아냄
-DATE_TAG_RE = re.compile(r'#r_([0-9A-Fa-f]{8})([DS])')
+# main이 날짜 안내 메시지 끝에 붙이는 꼬리표(#r_<8자리><D|S>[사유번호]) — 답장이 어느 건/어느 결과인지 상태 없이 알아냄
+DATE_TAG_RE = re.compile(r'#r_([0-9A-Fa-f]{8})([DS]\d?)')  # 밀림은 사유 번호까지(D1/D2)
 
 
 def is_command(text):

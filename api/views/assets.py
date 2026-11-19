@@ -494,6 +494,8 @@ _RESULT_SUB_REASON_MAP = {
     '정신질환': ('UNFIT', 'MENTAL_HEALTH'), '건강비합': ('UNFIT', 'HEALTH_UNFIT'),
     '경계탈락': ('DROPOUT', 'BOUNDARY_DROPOUT'), '갈부탈락': ('DROPOUT', 'CONFLICT_DROPOUT'),
 }
+# 밀림 사유(2026-11-20) — 화면 문구 → MATCH_SUB_REASON_CODES.SUB_CODE(RESULT_CODE='DELAY'). 텔레그램 /r도 같은 순서
+DELAY_REASONS = {'섭외자미룸': 'DELAY_RECRUIT_POSTPONE', '교사못구함': 'DELAY_NO_TEACHER'}
 
 
 @csrf_exempt
@@ -1106,9 +1108,10 @@ def record_match_result(client, sarang_id, result_val, sub_reason):
     return True
 
 
-def record_postpone(client, sarang_id, log_type, new_date, sabun, reason=''):
+def record_postpone(client, sarang_id, log_type, new_date, sabun, reason='', sub_reason=None):
     """밀림처리/2차만남 — 열린 시도를 마무리하고 다음 시도 행 추가(new_date 'YYYY-MM-DD HH:MM' 또는 미정/빈값).
-    웹(postpone_meeting)과 텔레그램(/r_)이 공유. 열린 시도가 없으면 False."""
+    웹(postpone_meeting)과 텔레그램(/r_)이 공유. 열린 시도가 없으면 False.
+    sub_reason은 밀림 사유 코드(DELAY_REASONS 값) — 2차만남이면 무시."""
     result_code = 'DELAY' if log_type == '밀림처리' else 'SECOND_MEET'
     cur = client.query_one(
         """SELECT MATCH_ID, MATCH_DEGREE, ATTEMPT_COUNT, TEACHER_MEMBER_ID, MATCH_LOCATION
@@ -1125,8 +1128,8 @@ def record_postpone(client, sarang_id, log_type, new_date, sabun, reason=''):
         next_degree, next_attempt = int(cur['match_degree']) + 1, 1
 
     stmts = [
-        {'sql': "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, STATUS = 'FINISHED' WHERE MATCH_ID = :2",
-         'args': [result_code, cur['match_id']]},
+        {'sql': "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
+         'args': [result_code, sub_reason if result_code == 'DELAY' else None, cur['match_id']]},
         {'sql': "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE, CONTENT) VALUES (:1, :2, :3, :4, :5)",
          'args': [uuid.uuid4().hex.upper(), sarang_id, sabun, log_type, reason or None]},
     ]
@@ -1179,7 +1182,8 @@ def postpone_meeting(request, *args, **kwargs):
     sabun = request.user['sabun']
     client = DataRouterClient()
 
-    if not record_postpone(client, sarang_id, log_type, new_date, sabun, reason):
+    delay_sub = DELAY_REASONS.get(str(body.get('delayReason') or '').strip())  # 밀림 사유(없으면 옛 화면 — 사유 없이)
+    if not record_postpone(client, sarang_id, log_type, new_date, sabun, reason, delay_sub):
         return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
 
     return JsonResponse({'success': True, 'message': f'{log_type} 처리 완료!'})

@@ -352,12 +352,24 @@ class TelegramMatchResultTests(SimpleTestCase):
         _, _, rmr, _ = self._run('W')
         rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CONSULT_WIN', None)
         _, _, _, rp = self._run('S0')
-        rp.assert_called_once_with(None, self.ROW['sarang_id'], '2차만남', '미정', 'actor')
+        rp.assert_called_once_with(None, self.ROW['sarang_id'], '2차만남', '미정', 'actor', sub_reason=None)
 
     def test_postpone_prompt_carries_tag(self):
+        # 밀림은 사유 먼저(D → D1/D2 버튼), 사유를 고르면 날짜 안내에 사유 번호까지 꼬리표로
         _, sent, rmr, rp = self._run('D')
-        self.assertIn('#r_36017851D', sent[-1][1]['text'])
+        self.assertIn('밀림 사유', sent[-1][1]['text'])
+        _, sent, rmr, rp = self._run('D2')
+        self.assertIn('#r_36017851D2', sent[-1][1]['text'])
         rmr.assert_not_called(); rp.assert_not_called()
+
+    def test_delay_reason_undecided_and_kind(self):
+        from api.telegram.match_result_input import parse_kind
+        _, sent, _, rp = self._run('D10')
+        rp.assert_called_once_with(None, self.ROW['sarang_id'], '밀림처리', '미정', 'actor', sub_reason='DELAY_RECRUIT_POSTPONE')
+        self.assertIn('섭외자미룸', sent[-1][1]['text'])
+        self.assertEqual(parse_kind('D2'), ('D', ('교사못구함', 'DELAY_NO_TEACHER')))
+        self.assertEqual(parse_kind('D'), ('D', None))  # 사유 기능 전에 보낸 안내 메시지
+        self.assertIsNone(parse_kind('D9'))
 
 
 class TelegramNameCommandTests(SimpleTestCase):

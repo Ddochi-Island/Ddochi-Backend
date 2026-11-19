@@ -268,7 +268,7 @@ def telegram_match_result(request, *args, **kwargs):
         return JsonResponse({'ok': False})
     if body.get('mode') == 'date':
         kind = str(body.get('kind') or '')
-        if kind not in match_result_input.POSTPONE:
+        if not match_result_input.parse_kind(kind):
             return JsonResponse({'ok': False})
         match_result_input.handle_date_reply(
             client, short, kind, body.get('text'), chat_id, body.get('replyTo'), body.get('promptMessageId'),

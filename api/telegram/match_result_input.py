@@ -25,8 +25,21 @@ SUB_REASONS = {
     'X': [('경계탈락', 'BOUNDARY_DROPOUT'), ('갈부탈락', 'CONFLICT_DROPOUT')],
 }
 POSTPONE = {'D': '밀림처리', 'S': '2차만남'}
-# 날짜 안내 메시지에 박는 꼬리표 — 답장이 오면 tel_router가 이걸로 어느 건인지 알아냄(상태 저장 없이)
-DATE_TAG_RE = re.compile(r'#r_([0-9A-Fa-f]{8})([DS])')
+# 밀림 사유 — 밀림을 누르면 먼저 고르고(D1/D2) 그다음 날짜(2026-11-20). 웹 assets.DELAY_REASONS와 같은 순서
+DELAY_REASONS = [('섭외자미룸', 'DELAY_RECRUIT_POSTPONE'), ('교사못구함', 'DELAY_NO_TEACHER')]
+# 날짜 안내 메시지에 박는 꼬리표 — 답장이 오면 tel_router가 이걸로 어느 건인지 알아냄(상태 저장 없이).
+# 밀림은 사유 번호까지(D1/D2), 사유 없는 D는 이 변경 전에 보낸 안내 메시지
+DATE_TAG_RE = re.compile(r'#r_([0-9A-Fa-f]{8})([DS]\d?)')
+
+
+def parse_kind(kind):
+    """'D'/'S'/'D1'/'D2' → (POSTPONE 키, 밀림 사유 (라벨, 코드) 또는 None). 모르는 값이면 None."""
+    kind = str(kind or '')
+    if kind in POSTPONE:
+        return kind, None
+    if len(kind) == 2 and kind[0] == 'D' and kind[1].isdigit() and 1 <= int(kind[1]) <= len(DELAY_REASONS):
+        return 'D', DELAY_REASONS[int(kind[1]) - 1]
+    return None
 
 
 def _cb(chat_id, short, code):
@@ -83,7 +96,7 @@ def start(client, short, chat_id, reply_to=None):
 
 
 def handle_callback(client, args, chat_id, message_id, actor_resolver):
-    """버튼 탭. args = '<short>.<code>' — code: 결과(C/D/U/X/S/W), 사유(C1/U2…), 미정(D0/S0), 뒤로(b)."""
+    """버튼 탭. args = '<short>.<code>' — code: 결과(C/D/U/X/S/W), 사유(C1/U2…), 밀림 사유(D1/D2), 미정(S0/D10/D20), 뒤로(b)."""
     from api.views.assets import record_match_result, record_postpone  # 순환 import 회피
 
     short, _, code = str(args or '').partition('.')
@@ -119,19 +132,28 @@ def handle_callback(client, args, chat_id, message_id, actor_resolver):
         _edit(chat_id, message_id, f'✅ {head}\n→ {label} 입력 완료')
         return {'toast': f'{label} 입력 완료'}
 
-    if code in POSTPONE:  # 날짜 안내 — 답장으로 받음
+    if code == 'D':  # 밀림 — 사유 먼저
+        back = {'text': '← 뒤로', 'callback_data': _cb(chat_id, short, 'b')}
+        btns = [{'text': label, 'callback_data': _cb(chat_id, short, f'D{i + 1}')} for i, (label, _) in enumerate(DELAY_REASONS)]
+        _edit(chat_id, message_id, f'{head}\n밀림 사유를 골라줘', {'inline_keyboard': [btns, [back]]})
+        return {'toast': None}
+
+    kind = parse_kind(code)
+    if kind:  # 날짜 안내(2차만남 S, 밀림 사유 고른 뒤 D1/D2) — 답장으로 받음
         back = {'text': '← 뒤로', 'callback_data': _cb(chat_id, short, 'b')}
         undecided = {'text': '날짜 미정', 'callback_data': _cb(chat_id, short, f'{code}0')}
-        label = _RESULT_BY_CODE[code][0]
+        label = _RESULT_BY_CODE[kind[0]][0] + (f'({kind[1][0]})' if kind[1] else '')
         _edit(chat_id, message_id,
               f"{head}\n{label} — 다음 만남 날짜를 <b>이 메시지에 답장</b>으로 보내줘\n예) <code>10/12 19:00</code>\n#r_{short}{code}",
               {'inline_keyboard': [[undecided, back]]})
         return {'toast': '날짜를 답장으로 보내줘'}
 
-    if code in ('D0', 'S0'):
+    if code.endswith('0') and parse_kind(code[:-1]):  # 날짜 미정(S0, D10/D20, 옛 버튼 D0)
+        base, reason = parse_kind(code[:-1])
         actor = actor_resolver(client, row['sarang_id'])
-        record_postpone(client, row['sarang_id'], POSTPONE[code[0]], '미정', actor)
-        _edit(chat_id, message_id, f'✅ {head}\n→ {_RESULT_BY_CODE[code[0]][0]} (날짜 미정) 입력 완료')
+        record_postpone(client, row['sarang_id'], POSTPONE[base], '미정', actor, sub_reason=reason[1] if reason else None)
+        label = _RESULT_BY_CODE[base][0] + (f'({reason[0]})' if reason else '')
+        _edit(chat_id, message_id, f'✅ {head}\n→ {label} (날짜 미정) 입력 완료')
         return {'toast': '입력 완료'}
 
     return {'toast': '⚠️ 알 수 없는 버튼'}
@@ -165,8 +187,10 @@ def handle_date_reply(client, short, kind, text, chat_id, reply_to, prompt_messa
     if not when:
         _send(chat_id, '⚠️ 날짜를 못 읽었어. <code>10/12 19:00</code>처럼 보내줘', reply_to=reply_to)
         return
-    label = _RESULT_BY_CODE[kind][0]
-    record_postpone(client, row['sarang_id'], POSTPONE[kind], when, actor_resolver(client, row['sarang_id']))
+    base, reason = parse_kind(kind)
+    label = _RESULT_BY_CODE[base][0] + (f'({reason[0]})' if reason else '')
+    record_postpone(client, row['sarang_id'], POSTPONE[base], when, actor_resolver(client, row['sarang_id']),
+                    sub_reason=reason[1] if reason else None)
     done = f"✅ {_head(row)}\n→ {label} ({when[5:].replace('-', '/')}) 입력 완료"
     if prompt_message_id:
         _edit(chat_id, prompt_message_id, done)
