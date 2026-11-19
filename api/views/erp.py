@@ -604,17 +604,21 @@ def _match_summary(matches, scheduled_at):
     top = max((int(r['match_degree'] or 0) for r in matches), default=0)
     later = last([r for r in matches if int(r['match_degree'] or 0) == top]) if top > 1 else None
     consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
-    # 취소·비합 사유 — 가장 마지막 시도가 취소/비합으로 끝났으면 그 세부 사유(경계취소·환경비합 등, 2026-11-20)
-    latest = max(matches, key=lambda r: (int(r['match_degree'] or 0), int(r['attempt_count'] or 0)), default=None)
-    end = latest if latest and latest['result'] in ('CANCEL', 'UNFIT') else None
+
+    def label(r):
+        """결과 라벨 — 취소·비합은 세부 사유를 괄호로(예: 취소(경계취소), 2026-11-20 사용자 결정)"""
+        if not r:
+            return ''
+        base = r.get('result_label') or ''
+        sub = r.get('sub_reason_label')
+        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT') else base
     return {
         'first_at': (first or {}).get('matched_at') or scheduled_at,
-        'first_result': (first or {}).get('result_label') or '',
-        'later_result': (later or {}).get('result_label') or ('진행 예정' if later else ''),
+        'first_result': label(first),
+        'later_result': label(later) or ('진행 예정' if later else ''),
         'consult_at': min(consult) if consult else None,
         # 지금 만남 단계 — 가장 높은 차수(2차만남으로 넘어가면 2차). 매칭 이력이 아직 없으면 1차(만남 예정)
         'meet_stage': f'{max(top, 1)}차',
-        'end_reason': ((end.get('sub_reason_label') or end.get('result_label')) if end else '') or '',
     }
 
 
