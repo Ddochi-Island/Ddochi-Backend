@@ -655,7 +655,7 @@ def _match_summary(matches, scheduled_at):
             return label(r)
         return label(last([x for x in degree(d) if x['result'] == 'DELAY']))
     first_res = _with_second_date(or_delay(first, 1), first, last(degree(2)))
-    later_res = or_delay(later, top)
+    later_res = or_delay(later, top) if later else ('', '')  # 2차 이상이 없으면 비움(1차 밀림이 이후 결과에 또 나오던 것 수정)
     return {
         'first_at': (first or {}).get('matched_at') or scheduled_at,
         'first_result': first_res[0], 'first_term': first_res[1],
