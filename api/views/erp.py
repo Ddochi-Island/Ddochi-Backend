@@ -643,10 +643,7 @@ def _match_summary(matches, scheduled_at):
                         and int(x['attempt_count'] or 0) == int(r['attempt_count'] or 0) + 1), None)
             when = _md(nxt['matched_at']) if nxt and nxt.get('matched_at') else '미정'
             return f"{base}({sub + ' - ' if sub else ''}{when})"
-        if r.get('result') == 'DROPOUT':  # 탈락은 탈락한 만남 날짜도 — 탈락(갈부탈락 - 11/18), 2026-11-20 사용자 요청
-            when = _md(r['matched_at']) if r.get('matched_at') else '미정'
-            return f"{base}({sub + ' - ' if sub else ''}{when})"
-        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT') else base
+        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base
 
     def or_delay(r, d):
         """결과 전인 시도면 같은 차수의 마지막 밀림을 대신 — 밀린 채 다음 날짜를 기다리는 중임을 보여줌"""
