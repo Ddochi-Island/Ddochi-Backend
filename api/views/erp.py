@@ -606,12 +606,12 @@ def _match_summary(matches, scheduled_at):
     consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
 
     def label(r):
-        """결과 라벨 — 취소·비합은 세부 사유를 괄호로(예: 취소(경계취소), 2026-11-20 사용자 결정)"""
+        """결과 라벨 — 취소·비합·탈락은 세부 사유를 괄호로(예: 취소(경계취소), 탈락(갈부탈락), 2026-11-20 사용자 결정)"""
         if not r:
             return ''
         base = r.get('result_label') or ''
         sub = r.get('sub_reason_label')
-        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT') else base
+        return f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base
     return {
         'first_at': (first or {}).get('matched_at') or scheduled_at,
         'first_result': label(first),
