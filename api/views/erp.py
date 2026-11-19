@@ -609,6 +609,8 @@ def _match_summary(matches, scheduled_at):
         'first_result': (first or {}).get('result_label') or '',
         'later_result': (later or {}).get('result_label') or ('진행 예정' if later else ''),
         'consult_at': min(consult) if consult else None,
+        # 지금 만남 단계 — 가장 높은 차수(2차만남으로 넘어가면 2차). 매칭 이력이 아직 없으면 1차(만남 예정)
+        'meet_stage': f'{max(top, 1)}차',
     }
 
 
