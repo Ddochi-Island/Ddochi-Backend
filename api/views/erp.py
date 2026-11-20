@@ -677,11 +677,18 @@ _TEACHER_AS_GUIDE_CODES = ('youth_chair', 'youth_mission_head', 'executive', 're
 _TEACHER_AS_GUIDE_SQL = ', '.join(f"'{c}'" for c in _TEACHER_AS_GUIDE_CODES)
 
 
+# 최초만남 기준 조회 때 합당한자 날짜를 얼마나 앞까지 넓혀 볼지 — 재가 뒤 최초만남이 이만큼 늦어지는 건 거의 없음
+_FIRST_MEET_LOOKBACK_DAYS = 180
+
+
 @_admin_view
 def erp_match_list(client, body):
-    """재가된 사람 — 합당한자 날짜(_hap_date: 재가한 날) 기준 기간 안.
+    """재가된 사람 — 합당한자 날짜(_hap_date: 재가한 날) 기준 기간 안. basis='first'면 최초만남 날짜(first_at) 기준
+    (2026-11-20 사용자 요청) — 최초만남은 매칭 이력에서 계산하는 값이라, 합당한자 날짜를 앞뒤로 넉넉히 넓혀 가져온 뒤 걸러냄.
     구 매칭 시트처럼 인도·교사 소속(지역/반/구역), 섭외자·인도자·교사, 경로·도구·온오프, 최초/이후 만남 결과, 상담연결 날."""
     frm, to = _dates(body)
+    by_first = body.get('basis') == 'first'
+    q_frm, q_to = (frm - datetime.timedelta(days=_FIRST_MEET_LOOKBACK_DAYS), to + datetime.timedelta(days=30)) if by_first else (frm, to)
     # 처음 재가한 날. 6~8월 옮겨 온 데이터는 재가 기록이 없어 예전 기준(마지막 만남 픽스 날, 없으면 합재양 작성일)으로 대신함
     hap_at = f"""COALESCE((SELECT MIN(a.CREATED_AT) + {_JAEGA_SHIFT} FROM SARANG_ACTIVITY_LOGS a WHERE a.SARANG_ID = s.SARANG_ID AND a.EVENT_TYPE = '재가처리'),
                       (SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'), h.CREATED_AT)"""
@@ -700,7 +707,7 @@ def erp_match_list(client, body):
           LEFT JOIN MEMBERS tm ON tm.MEMBER_ID = h.TEACHER_MEMBER_ID
           LEFT JOIN MEMBER_AFFILIATION_HISTORIES tmah ON tmah.MEMBER_ID = h.TEACHER_MEMBER_ID AND tmah.IS_CURRENT = 1
          WHERE s.DELETED_AT IS NULL AND h.APPROVAL_STATUS = 'approved' AND {_in_range(hap_at)}
-         ORDER BY HAP_AT""", [frm.isoformat(), to.isoformat()], fetch_limit=20000)
+         ORDER BY HAP_AT""", [q_frm.isoformat(), q_to.isoformat()], fetch_limit=20000)
     matches = {}
     ids = [r['sarang_id'] for r in rows]
     for i in range(0, len(ids), 500):  # IN 목록 1000개 한도
@@ -727,6 +734,8 @@ def erp_match_list(client, body):
         r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
         r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
         r['hap_date'] = _hap_date(r['hap_at'])
+    if by_first:  # first_at은 벽시계 시각이 Z 붙은 채라 날짜 부분만 비교
+        rows = [r for r in rows if r['first_at'] and frm.isoformat() <= r['first_at'][:10] <= to.isoformat()]
     return {'rows': rows}
 
 
