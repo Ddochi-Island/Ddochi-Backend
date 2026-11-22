@@ -24,12 +24,13 @@ logger = logging.getLogger('api.telegram.team_stats')
 _WEEK = ['일', '월', '화', '수', '목', '금', '토']
 _BAR_LEN = 7
 
-# 활동자 기준(2026-11-16 공지) — 공지 순서. 옛 offlineSearch(오프찾)는 새 기준에서 대면(찾기)에 포함.
-_ACTIVITY_GROUPS = {'offline': '👥 대면활동', 'flyer': '📄 전단지활동', 'online': '🌐 비대면활동', 'substitute': '🔄 대체활동'}
+# 활동자 기준(2026-11-22 공지) — 대면 A/대면 B/대체. 옛 값은 공지 환산대로(대면·전단지·오프찾 → A, 비대면 → 대체).
+_ACTIVITY_GROUPS = {'offline': '👥 대면활동 A단계', 'offlineB': '🙋 대면활동 B단계', 'substitute': '🔄 대체활동'}
+_LEGACY_ACTIVITY = {'offlineSearch': 'offline', 'flyer': 'offline', 'online': 'substitute'}
 
 
 def _activity_group(code):
-    code = 'offline' if code == 'offlineSearch' else code
+    code = _LEGACY_ACTIVITY.get(code, code)
     return code if code in _ACTIVITY_GROUPS else None
 
 
@@ -197,7 +198,7 @@ def _build_text(region_code, date_str, reports, approvals, offline_search, hjy_s
         group = _activity_group(r['activity'])
         if group:
             acts[group].append(item)
-        if group == 'offline':
+        if group in ('offline', 'offlineB'):  # 구역 표 '활동' = 대면활동자(A+B)
             slot['off_act'] += 1
 
     for a in approvals:

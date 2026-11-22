@@ -166,13 +166,17 @@ class ActivityGroupTests(SimpleTestCase):
     def test_new_criteria_groups(self):
         from api.telegram.team_stats import _activity_group
         from api.views.daily_report import _ACTIVITY_CODE_TO_KO, _ACTIVITY_KO_TO_CODE
-        # 옛 오프찾은 대면으로 셈(2026-11-16)
+        # 2026-11-22 기준 환산 — 대면·전단지·오프찾 → A, 비대면 → 대체
         self.assertEqual(_activity_group('offlineSearch'), 'offline')
-        self.assertEqual(_activity_group('flyer'), 'flyer')
+        self.assertEqual(_activity_group('flyer'), 'offline')
+        self.assertEqual(_activity_group('online'), 'substitute')
+        self.assertEqual(_activity_group('offlineB'), 'offlineB')
         self.assertEqual(_activity_group('substitute'), 'substitute')
         self.assertIsNone(_activity_group('none'))
-        self.assertEqual(_ACTIVITY_CODE_TO_KO['offlineSearch'], '대면 활동!')
-        self.assertEqual(_ACTIVITY_KO_TO_CODE['대체 활동!'], 'substitute')
+        self.assertEqual(_ACTIVITY_CODE_TO_KO['flyer'], '대면 활동 A단계!')
+        self.assertEqual(_ACTIVITY_CODE_TO_KO['online'], '대체 활동!')
+        self.assertEqual(_ACTIVITY_KO_TO_CODE['대면 활동 B단계!'], 'offlineB')
+        self.assertEqual(_ACTIVITY_KO_TO_CODE['전단지 활동!'], 'offline')
 
 
 class TruncTests(SimpleTestCase):
