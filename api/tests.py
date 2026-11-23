@@ -223,7 +223,8 @@ class SproutApprovalTests(SimpleTestCase):
         from api.views.short_card import _journal_stage
         self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': None}), '새싹')
         self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'pending'}), '새싹')
-        self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'approved'}), '떡잎')
+        # 3단계까지 다 채운 떡잎은 꽃(밭 게임 1차)
+        self.assertEqual(_journal_stage({**self.FULL, 'sprout_status': 'approved'}), '꽃')
         # 3단계는 비어도 2단계까지 채우고 재가되면 떡잎(2026-10-05)
         no3 = {**self.FULL, 'desired_image': None, 'recent_concern': None, 'family_atmosphere': None, 'human_relations': None}
         self.assertEqual(_journal_stage({**no3, 'sprout_status': 'approved'}), '떡잎')
@@ -461,3 +462,42 @@ class ShedGachaPublicTests(ShedGachaRegionTests):
         self.extra = {'received_day': '2026-10-01', 'inflow_day': old, 'calls': '9'}  # 합당한자 이전 건은 해당 없음
         res, guide, _ = self._run('3', 0.0)
         self.assertEqual((res['public'], guide), (False, 'INFLOW'))
+
+
+class FarmGameTests(SimpleTestCase):
+    def test_species_is_stable_and_weighted(self):
+        from collections import Counter
+        from api.views.farm import plant_species
+        self.assertEqual(plant_species('ABC'), plant_species('ABC'))
+        n = 20000
+        counts = Counter(plant_species(f'{i:032X}')['rarity'] for i in range(n))
+        self.assertAlmostEqual(counts['common'] / n, 0.75, delta=0.03)
+        self.assertAlmostEqual(counts['rare'] / n, 0.20, delta=0.03)
+        self.assertAlmostEqual(counts['legend'] / n, 0.05, delta=0.02)
+
+    def test_missing_rewards_cumulative_and_only_mine(self):
+        from api.views.farm import missing_stage_rewards
+        cards = [{'member_id': 'me', 'short_card_id': 'A', 'stage': '떡잎'},
+                 {'member_id': 'other', 'short_card_id': 'B', 'stage': '꽃'}]
+        got = {('stage_씨앗', 'A')}
+        self.assertEqual(missing_stage_rewards(cards, 'me', got),
+                         [('stage_새싹', 'A', 3), ('stage_떡잎', 'A', 10)])
+
+    def test_award_returns_balance_and_gain(self):
+        from api.views.farm import award_stage_sunshine
+        client = MagicMock()
+        client.query.return_value = [{'reason': 'stage_씨앗', 'ref_id': 'A', 'amount': '1'}]
+        client.exec.return_value = 1
+        bal, gained = award_stage_sunshine(client, 'me', [{'member_id': 'me', 'short_card_id': 'A', 'stage': '새싹'}])
+        self.assertEqual((bal, gained), (4, 3))
+        sql, args = client.exec.call_args[0]
+        self.assertIn('IGNORE_ROW_ON_DUPKEY_INDEX', sql)
+        self.assertEqual(args, ['me', 'stage_새싹', 'A', 3])
+
+    def test_award_rechecks_balance_on_race(self):
+        from api.views.farm import award_stage_sunshine
+        client = MagicMock()
+        client.query.return_value = []
+        client.exec.return_value = 0            # 다른 요청이 먼저 넣음
+        client.query_one.return_value = {'total': '1'}
+        self.assertEqual(award_stage_sunshine(client, 'me', [{'member_id': 'me', 'short_card_id': 'A', 'stage': '씨앗'}]), (1, 1))

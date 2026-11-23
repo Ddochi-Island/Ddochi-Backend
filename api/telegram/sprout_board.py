@@ -4,7 +4,7 @@ from django.utils import timezone
 
 from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.team_config import load_team_config
-from api.views.short_card import GROUP_SPROUT_GOAL, _JOURNAL_FIELDS, _journal_stage
+from api.views.short_card import GROUP_SPROUT_GOAL, SPROUT_STAGES, _JOURNAL_FIELDS, _journal_stage
 
 TEAM_ID = '수지역'  # 수지역 매칭현황판과 같은 방("[대학] 전도시스템", matchingChatId)
 _WEEK = ['월', '화', '수', '목', '금', '토', '일']
@@ -59,7 +59,7 @@ def build_blocks(client, sample=False):
     groups, cards, districts = _fetch(client)
     if sample:
         cards = _sample_cards()
-    sprouts = [c for c in cards if _journal_stage(c) == '떡잎']
+    sprouts = [c for c in cards if _journal_stage(c) in SPROUT_STAGES]
     pending = [c for c in cards if c['sprout_status'] == 'pending']
 
     by_region = {}

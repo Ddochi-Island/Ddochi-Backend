@@ -7,7 +7,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from api.auth.gate import require_jwt
-from api.clients.data_router import DataRouterClient
+from api.clients.data_router import DataRouterClient, DataRouterError
+from api.views.farm import award_stage_sunshine, plant_species
 
 _GENDERS = {'남', '여'}
 _RELIGIONS = {'무교', '기독교', '불교', '천주교', '기타'}
@@ -26,6 +27,8 @@ _TIER_DISTRICT_GENERAL = {'sub_area_lead', 'team_clerk', 'team_mission_clerk', '
 
 # 반 떡잎 목표 — 반마다 떡잎 5개를 유지(2026-09-30 사용자 결정). 밭 관리하기 상단/일일보고 텔레그램에 표시.
 GROUP_SPROUT_GOAL = 5
+# 떡잎 이상 — 떡잎 다음 단계인 꽃도 떡잎으로 셈(반 떡잎 목표·텔레그램 떡잎 전광판)
+SPROUT_STAGES = ('떡잎', '꽃')
 _SPROUT_STATUS_KO = {'pending': '떡잎 재가 대기', 'approved': '떡잎 재가 완료', 'rejected': '떡잎 반려'}
 
 # 농부일지 필드 — 단계 판정에 쓰는 필드만(짧카 자체 필드 age/gender/phone/residence/
@@ -130,11 +133,11 @@ def _stage3_complete(row):
 
 
 def _journal_stage(row):
-    """씨앗(기본)/새싹(2단계 완료)/떡잎(2단계 완료 + 반장 이상 재가). 2단계까지 채우면 재가 요청, 재가 전엔 새싹
-    (2026-10-05 변경 — 전엔 3단계까지 다 채워야 재가 요청. 3단계는 이제 떡잎 이후에 채워가는 칸)."""
-    _, s2, _ = _stage3_complete(row)
+    """씨앗(기본)/새싹(2단계 완료)/떡잎(2단계 완료 + 반장 이상 재가)/꽃(떡잎 + 3단계 완료). 2단계까지 채우면 재가 요청,
+    재가 전엔 새싹(2026-10-05 변경 — 전엔 3단계까지 다 채워야 재가 요청. 3단계는 떡잎 이후에 채워가는 칸 → 다 채우면 꽃)."""
+    _, s2, s3 = _stage3_complete(row)
     if s2 and row.get('sprout_status') == 'approved':
-        return '떡잎'
+        return '꽃' if s3 else '떡잎'
     if s2:
         return '새싹'
     return '씨앗'
@@ -183,7 +186,7 @@ def group_sprout_status(client, region_codes=None):
     )
     sprouts = {}
     for c in cards:
-        if _journal_stage(c) == '떡잎':
+        if _journal_stage(c) in SPROUT_STAGES:
             key = (c['region_code'], c['district_code'])
             sprouts[key] = sprouts.get(key, 0) + 1
     out = []
@@ -277,7 +280,8 @@ def submit_short_card(request, *args, **kwargs):
             "SELECT 1 FROM SARANG_PERSONAL_INFO WHERE PHONE_NORMALIZED = :1 FETCH FIRST 1 ROWS ONLY",
             [phone_normalized],
         )
-    return JsonResponse({'success': True, 'message': '짧카 작성 완료!', 'duplicateInSarang': bool(sarang_dup)})
+    return JsonResponse({'success': True, 'message': '짧카 작성 완료!', 'duplicateInSarang': bool(sarang_dup),
+                         'species': plant_species(short_card_id)})
 
 
 @csrf_exempt
@@ -312,6 +316,14 @@ def list_short_cards(request, *args, **kwargs):
         r['sprout_status_label'] = _SPROUT_STATUS_KO.get(r['sprout_status'])
         r['can_decide_sprout'] = (r['sprout_status'] == 'pending'
                                   and _can_decide_sprout(ctx, r['author_region'], r['author_district']))
+        sp = plant_species(r['short_card_id'])
+        r['species'], r['species_name'], r['rarity'] = sp['key'], sp['name'], sp['rarity']
+
+    # 밭 게임 햇살 — 내 짧카 단계 보상 적립. 테이블 문제로 실패해도 밭 목록은 그대로 보여줌.
+    try:
+        sunshine, sunshine_gained = award_stage_sunshine(client, sabun, rows)
+    except DataRouterError:
+        sunshine, sunshine_gained = None, 0
 
     if position_code in _TIER_GLOBAL:
         others_label = '전체의 밭'
@@ -330,7 +342,8 @@ def list_short_cards(request, *args, **kwargs):
         others_label = None  # 회원 등 본인만 보이는 티어 — "남의 밭" 자체가 없음
         goals = []
 
-    return JsonResponse({'success': True, 'list': rows, 'othersLabel': others_label, 'groupGoals': goals})
+    return JsonResponse({'success': True, 'list': rows, 'othersLabel': others_label, 'groupGoals': goals,
+                         'sunshine': sunshine, 'sunshineGained': sunshine_gained})
 
 
 def _led_group_ids(client, sabun):
