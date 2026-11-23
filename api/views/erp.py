@@ -46,10 +46,6 @@ _REACH_SUMS = f"""COUNT(*) AS REG,
                         THEN 1 ELSE 0 END) AS CONSULT"""
 
 
-# 재가는 22시(KST) 이후면 다음 날 재가로 셈(2026-11-11 사용자 결정) — 2시간 더해서 날짜를 냄
-_JAEGA_SHIFT = "INTERVAL '2' HOUR"
-
-
 def _in_range(col):
     """KST 달력 날짜 [from, to] — 바인드 2개(from, to 문자열 'YYYY-MM-DD')를 차례로 받음."""
     return (f"{col} >= FROM_TZ(TO_TIMESTAMP(?, 'YYYY-MM-DD'), 'Asia/Seoul') "
@@ -229,7 +225,7 @@ def erp_tm_stats(client, body):
                   FROM TM_LOGS WHERE RESULT = 'MEET_FIX' GROUP BY SARANG_ID) mf ON mf.SARANG_ID = al.SARANG_ID
           JOIN MEMBERS m ON m.MEMBER_ID = mf.CALLER_MEMBER_ID
           LEFT JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = mf.CALLER_MEMBER_ID AND mah.IS_CURRENT = 1
-         WHERE al.EVENT_TYPE = '재가처리' AND {_in_range(f'al.CREATED_AT + {_JAEGA_SHIFT}')}
+         WHERE al.EVENT_TYPE = '재가처리' AND {_in_range('al.CREATED_AT')}
          GROUP BY mf.CALLER_MEMBER_ID, m.NAME, mah.REGION_CODE, mah.DISTRICT_CODE""",
         [frm.isoformat(), to.isoformat()], fetch_limit=5000)
 
@@ -278,7 +274,7 @@ def _period_metrics(client, frm, to):
                    AND NOT EXISTS (SELECT 1 FROM TM_LOGS t WHERE t.SARANG_ID = al.SARANG_ID AND t.RESULT = 'MEET_FIX')) e
           JOIN SARANG s ON s.SARANG_ID = e.SARANG_ID AND s.DELETED_AT IS NULL {_INTRO_MAH}
          GROUP BY mah.REGION_CODE, mah.DISTRICT_CODE""", a + a), 'meetFix')
-    for event, key, at in (('합재양작성', 'hjy', 'al.CREATED_AT'), ('재가처리', 'jaega', f'al.CREATED_AT + {_JAEGA_SHIFT}')):
+    for event, key, at in (('합재양작성', 'hjy', 'al.CREATED_AT'), ('재가처리', 'jaega', 'al.CREATED_AT')):
         add(_q(client, f"""
             SELECT mah.REGION_CODE, mah.DISTRICT_CODE, COUNT(DISTINCT s.SARANG_ID) AS N
               FROM SARANG_ACTIVITY_LOGS al JOIN SARANG s ON s.SARANG_ID = al.SARANG_ID AND s.DELETED_AT IS NULL {_INTRO_MAH}
@@ -328,7 +324,7 @@ def erp_weekly(client, body):
             LEFT JOIN MEMBERS im ON im.MEMBER_ID = sid.INTRODUCER_MEMBER_ID
             LEFT JOIN SARANG_HAB_JAE_YANG h ON h.SARANG_ID = s.SARANG_ID AND h.IS_ACTIVE = 1
             LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = h.GUIDE_MEMBER_ID
-           WHERE al.EVENT_TYPE = '재가처리' AND {_in_range(f'al.CREATED_AT + {_JAEGA_SHIFT}')}
+           WHERE al.EVENT_TYPE = '재가처리' AND {_in_range('al.CREATED_AT')}
         ) WHERE RN = 1 ORDER BY AT""", a, fetch_limit=2000)
     matches = _q(client, f"""
         SELECT spi.NAME, gm.NAME AS GUIDE_NAME, COALESCE(tm.NAME, h.TEACHER_NAME_OVERRIDE) AS TEACHER_NAME, h.TOOL,
@@ -667,7 +663,7 @@ def _match_summary(matches, scheduled_at):
 
 
 def _hap_date(hap_at):
-    """합당한자 날짜(YYYY-MM-DD) — 재가한 날(KST, 22시 이후 재가는 다음 날 — SQL에서 2시간 더해 옴. 2026-11-11 사용자 결정)."""
+    """합당한자 날짜(YYYY-MM-DD) — 재가한 날(KST, 자정 전이면 당일 — 2026-11-24 사용자 결정)."""
     return (datetime.datetime.fromisoformat(hap_at.replace('Z', '+00:00')) + datetime.timedelta(hours=9)).date().isoformat()
 
 
@@ -691,7 +687,7 @@ def erp_match_list(client, body):
     by_first = body.get('basis') == 'first'
     q_frm, q_to = (frm - datetime.timedelta(days=_FIRST_MEET_LOOKBACK_DAYS), to + datetime.timedelta(days=30)) if by_first else (frm, to)
     # 처음 재가한 날. 6~8월 옮겨 온 데이터는 재가 기록이 없어 예전 기준(마지막 만남 픽스 날, 없으면 합재양 작성일)으로 대신함
-    hap_at = f"""COALESCE((SELECT MIN(a.CREATED_AT) + {_JAEGA_SHIFT} FROM SARANG_ACTIVITY_LOGS a WHERE a.SARANG_ID = s.SARANG_ID AND a.EVENT_TYPE = '재가처리'),
+    hap_at = f"""COALESCE((SELECT MIN(a.CREATED_AT) FROM SARANG_ACTIVITY_LOGS a WHERE a.SARANG_ID = s.SARANG_ID AND a.EVENT_TYPE = '재가처리'),
                       (SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'), h.CREATED_AT)"""
     rows = _q(client, f"""
         SELECT s.SARANG_ID, spi.NAME, s.STAGE, s.RECRUITMENT_TYPE, {hap_at} AS HAP_AT,

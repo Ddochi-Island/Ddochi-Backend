@@ -109,7 +109,7 @@ def _fetch_approvals(client, region_code, date_str):
                  ON mah.MEMBER_ID = COALESCE((SELECT x.INTRODUCER_MEMBER_ID FROM SARANG_INFLOW_DETAILS x WHERE x.SARANG_ID = s.SARANG_ID), s.INFLOW_MEMBER_ID) AND mah.IS_CURRENT = 1
               WHERE al.EVENT_TYPE = '재가처리'
                 AND mah.REGION_CODE = :1
-                AND TRUNC(al.CREATED_AT) = TO_DATE(:2, 'YYYY-MM-DD')
+                AND TRUNC(CAST(al.CREATED_AT AT TIME ZONE 'Asia/Seoul' AS DATE)) = TO_DATE(:2, 'YYYY-MM-DD')  -- KST 자정 기준(2026-11-24)
            ) WHERE RN = 1""",
         [region_code, date_str],
     )
