@@ -630,6 +630,10 @@ def _match_summary(matches, scheduled_at):
     top = max((int(r['match_degree'] or 0) for r in matches), default=0)
     later = last(degree(top)) if top > 1 else None
     consult = [r['matched_at'] for r in matches if r['result'] == 'CONSULT_WIN' and r['matched_at']]
+    # 최종 만남일 — 지금 시점의 다음(마지막) 만남 날: 날짜가 잡힌 시도 중 가장 높은 차수·가장 늦은 시도(2026-11-24 사용자 결정).
+    # 2차·밀림 날짜가 아직 미정이면 그 전에 잡힌 날짜, 매칭 이력이 없으면 합재양 만남 예정일
+    dated = [r for r in matches if r['matched_at']]
+    last_dated = max(dated, key=lambda r: (int(r['match_degree'] or 0), int(r['attempt_count'] or 0))) if dated else None
 
     def label(r):
         """결과 라벨과 term — 취소·비합·탈락은 세부 사유를, 밀림은 사유와 밀린 날짜를 괄호로
@@ -657,6 +661,7 @@ def _match_summary(matches, scheduled_at):
         'first_result': first_res[0], 'first_term': first_res[1],
         'later_result': later_res[0] or ('진행 예정' if later else ''), 'later_term': later_res[1],
         'consult_at': min(consult) if consult else None,
+        'last_at': (last_dated or {}).get('matched_at') or scheduled_at,
         # 지금 만남 단계 — 가장 높은 차수(2차만남으로 넘어가면 2차). 매칭 이력이 아직 없으면 1차(만남 예정)
         'meet_stage': f'{max(top, 1)}차',
     }
@@ -684,8 +689,10 @@ def erp_match_list(client, body):
     (2026-11-20 사용자 요청) — 최초만남은 매칭 이력에서 계산하는 값이라, 합당한자 날짜를 앞뒤로 넉넉히 넓혀 가져온 뒤 걸러냄.
     구 매칭 시트처럼 인도·교사 소속(지역/반/구역), 섭외자·인도자·교사, 경로·도구·온오프, 최초/이후 만남 결과, 상담연결 날."""
     frm, to = _dates(body)
-    by_first = body.get('basis') == 'first'
-    q_frm, q_to = (frm - datetime.timedelta(days=_FIRST_MEET_LOOKBACK_DAYS), to + datetime.timedelta(days=30)) if by_first else (frm, to)
+    # basis: 'hap' 합당한자 날짜 / 'first' 최초만남 / 'last' 최종 만남일(2026-11-24) — 만남 날짜 기준은 매칭 이력에서 계산하는 값이라
+    # 합당한자 날짜를 앞뒤로 넉넉히 넓혀 가져온 뒤 걸러냄
+    meet_key = {'first': 'first_at', 'last': 'last_at'}.get(body.get('basis'))
+    q_frm, q_to = (frm - datetime.timedelta(days=_FIRST_MEET_LOOKBACK_DAYS), to + datetime.timedelta(days=30)) if meet_key else (frm, to)
     # 처음 재가한 날. 6~8월 옮겨 온 데이터는 재가 기록이 없어 예전 기준(마지막 만남 픽스 날, 없으면 합재양 작성일)으로 대신함
     hap_at = f"""COALESCE((SELECT MIN(a.CREATED_AT) FROM SARANG_ACTIVITY_LOGS a WHERE a.SARANG_ID = s.SARANG_ID AND a.EVENT_TYPE = '재가처리'),
                       (SELECT MAX(t.CREATED_AT) FROM TM_LOGS t WHERE t.SARANG_ID = s.SARANG_ID AND t.RESULT = 'MEET_FIX'), h.CREATED_AT)"""
@@ -730,8 +737,8 @@ def erp_match_list(client, body):
         r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
         r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
         r['hap_date'] = _hap_date(r['hap_at'])
-    if by_first:  # first_at은 벽시계 시각이 Z 붙은 채라 날짜 부분만 비교
-        rows = [r for r in rows if r['first_at'] and frm.isoformat() <= r['first_at'][:10] <= to.isoformat()]
+    if meet_key:  # 만남 날짜는 벽시계 시각이 Z 붙은 채라 날짜 부분만 비교
+        rows = [r for r in rows if r[meet_key] and frm.isoformat() <= r[meet_key][:10] <= to.isoformat()]
     return {'rows': rows}
 
 

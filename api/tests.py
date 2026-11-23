@@ -501,3 +501,15 @@ class FarmGameTests(SimpleTestCase):
         client.exec.return_value = 0            # 다른 요청이 먼저 넣음
         client.query_one.return_value = {'total': '1'}
         self.assertEqual(award_stage_sunshine(client, 'me', [{'member_id': 'me', 'short_card_id': 'A', 'stage': '씨앗'}]), (1, 1))
+
+
+class LastMeetDateTests(SimpleTestCase):
+    def test_last_at_follows_latest_scheduled_meeting(self):
+        from api.views.erp import _match_summary
+        m = lambda d, a, at, res=None: {'match_degree': str(d), 'attempt_count': str(a), 'matched_at': at, 'result': res, 'result_label': None}
+        # 매칭 이력 없음 → 합재양 만남 예정일
+        self.assertEqual(_match_summary([], '2026-11-24T14:00')['last_at'], '2026-11-24T14:00')
+        # 1차 24일 → 2차 26일로 잡히면 26일
+        self.assertEqual(_match_summary([m(1, 1, '2026-11-24T14:00Z', 'SECOND_MEET'), m(2, 1, '2026-11-26T14:00Z')], None)['last_at'], '2026-11-26T14:00Z')
+        # 밀림 다음 날짜가 아직 미정이면 마지막으로 잡혔던 날
+        self.assertEqual(_match_summary([m(1, 1, '2026-11-24T14:00Z', 'DELAY'), m(1, 2, None)], None)['last_at'], '2026-11-24T14:00Z')
