@@ -612,7 +612,9 @@ def _with_second_date(res, first, second):
     if not first or first.get('result') != 'SECOND_MEET':
         return res
     at = (second or {}).get('matched_at')
-    return (f"{res[0]}({_md(at) if at else '미정'})", _term(first.get('matched_at'), at))
+    # 단기/장기는 입력 때 고른 값(2026-11-25), 옛 기록은 날짜 간격으로
+    term = first.get('sub_reason_label') if first.get('sub_reason_label') in ('단기', '장기') else _term(first.get('matched_at'), at)
+    return (f"{res[0]}({_md(at) if at else '미정'})", term)
 
 
 def _match_summary(matches, scheduled_at):
@@ -647,7 +649,8 @@ def _match_summary(matches, scheduled_at):
                         and int(x['attempt_count'] or 0) == int(r['attempt_count'] or 0) + 1), None)
             at = (nxt or {}).get('matched_at')
             return f"{base}({sub + ' - ' if sub else ''}{_md(at) if at else '미정'})", _term(r.get('matched_at'), at)
-        return (f'{base}({sub})' if base and sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base), ''
+        # 취소·비합·탈락은 사유만(2026-11-25 취소/탈락 구분 없앰 — 경계심, 환경비합, 옛 기록은 경계취소처럼)
+        return (sub if sub and r.get('result') in ('CANCEL', 'UNFIT', 'DROPOUT') else base), ''
 
     def or_delay(r, d):
         """결과 전인 시도면 같은 차수의 마지막 밀림을 대신 — 밀린 채 다음 날짜를 기다리는 중임을 보여줌"""

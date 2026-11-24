@@ -27,18 +27,28 @@ SUB_REASONS = {
 POSTPONE = {'D': '밀림처리', 'S': '2차만남'}
 # 밀림 사유 — 밀림을 누르면 먼저 고르고(D1/D2) 그다음 날짜(2026-11-20). 웹 assets.DELAY_REASONS와 같은 순서
 DELAY_REASONS = [('섭외자미룸', 'DELAY_RECRUIT_POSTPONE'), ('교사못구함', 'DELAY_NO_TEACHER')]
+# 2026-11-25 결과 13개 목록 — 버튼 순서 그대로. 날짜가 필요한 건 (코드, 라벨), 바로 끝나는 건 E번호로 저장
+SECOND_TERMS = [('단기', 'SECOND_SHORT'), ('장기', 'SECOND_LONG')]
+ENDINGS = [('연락두절', 'CANCEL', 'CONTACT_LOST'), ('갈급부족', 'CANCEL', 'LACK_OF_THIRST'), ('환경비합', 'UNFIT', 'ENV_UNFIT'),
+           ('경계심', 'CANCEL', 'WARINESS'), ('중복섭외', 'CANCEL', 'DUPLICATE_RECRUIT'), ('정신질환', 'UNFIT', 'MENTAL_HEALTH'),
+           ('인성비합', 'UNFIT', 'PERSONALITY_UNFIT'), ('병가', 'CANCEL', 'SICK_LEAVE')]
+_E = {label: f'E{i + 1}' for i, (label, _, _) in enumerate(ENDINGS)}
+FLAT = [('상담연결', 'W'), ('2차만남(단기)', 'S1'), ('2차만남(장기)', 'S2'), ('연락두절', _E['연락두절']), ('갈급부족', _E['갈급부족']),
+        ('환경비합', _E['환경비합']), ('밀림(섭외자미룸)', 'D1'), ('밀림(교사못구함)', 'D2'), ('경계심', _E['경계심']),
+        ('중복섭외', _E['중복섭외']), ('정신질환', _E['정신질환']), ('인성비합', _E['인성비합']), ('병가', _E['병가'])]
 # 날짜 안내 메시지에 박는 꼬리표 — 답장이 오면 tel_router가 이걸로 어느 건인지 알아냄(상태 저장 없이).
 # 밀림은 사유 번호까지(D1/D2), 사유 없는 D는 이 변경 전에 보낸 안내 메시지
 DATE_TAG_RE = re.compile(r'#r_([0-9A-Fa-f]{8})([DS]\d?)')
 
 
 def parse_kind(kind):
-    """'D'/'S'/'D1'/'D2' → (POSTPONE 키, 밀림 사유 (라벨, 코드) 또는 None). 모르는 값이면 None."""
+    """'D'/'S'/'D1'/'D2'/'S1'/'S2' → (POSTPONE 키, 밀림 사유·2차 단기/장기 (라벨, 코드) 또는 None). 모르는 값이면 None."""
     kind = str(kind or '')
     if kind in POSTPONE:
         return kind, None
-    if len(kind) == 2 and kind[0] == 'D' and kind[1].isdigit() and 1 <= int(kind[1]) <= len(DELAY_REASONS):
-        return 'D', DELAY_REASONS[int(kind[1]) - 1]
+    reasons = {'D': DELAY_REASONS, 'S': SECOND_TERMS}.get(kind[:1])
+    if reasons and len(kind) == 2 and kind[1].isdigit() and 1 <= int(kind[1]) <= len(reasons):
+        return kind[0], reasons[int(kind[1]) - 1]
     return None
 
 
@@ -66,8 +76,8 @@ def _head(row):
 
 
 def _result_keyboard(chat_id, short):
-    btns = [{'text': label, 'callback_data': _cb(chat_id, short, c)} for c, label, _ in RESULTS]
-    return {'inline_keyboard': [btns[0:3], btns[3:6]]}
+    btns = [{'text': label, 'callback_data': _cb(chat_id, short, c)} for label, c in FLAT]
+    return {'inline_keyboard': [btns[i:i + 2] for i in range(0, len(btns), 2)]}
 
 
 def _send(chat_id, text, markup=None, reply_to=None):
@@ -96,7 +106,8 @@ def start(client, short, chat_id, reply_to=None):
 
 
 def handle_callback(client, args, chat_id, message_id, actor_resolver):
-    """버튼 탭. args = '<short>.<code>' — code: 결과(C/D/U/X/S/W), 사유(C1/U2…), 밀림 사유(D1/D2), 미정(S0/D10/D20), 뒤로(b)."""
+    """버튼 탭. args = '<short>.<code>' — code: 상담연결 W, 2차 단기/장기 S1/S2, 밀림 D1/D2, 끝(E1~E8), 미정(S10/S20/D10/D20), 뒤로(b).
+    옛 버튼(C/U/X·C1/U2…·D·S·S0)도 그대로 받음."""
     from api.views.assets import record_match_result, record_postpone  # 순환 import 회피
 
     short, _, code = str(args or '').partition('.')
@@ -115,7 +126,13 @@ def handle_callback(client, args, chat_id, message_id, actor_resolver):
         _edit(chat_id, message_id, f'✅ {head}\n→ 상담연결 입력 완료')
         return {'toast': '상담연결 입력 완료'}
 
-    if code in SUB_REASONS:  # 사유 고르기
+    if len(code) >= 2 and code[0] == 'E' and code[1:].isdigit() and 1 <= int(code[1:]) <= len(ENDINGS):
+        label, result, sub = ENDINGS[int(code[1:]) - 1]
+        record_match_result(client, row['sarang_id'], result, sub)
+        _edit(chat_id, message_id, f'✅ {head}\n→ {label} 입력 완료')
+        return {'toast': f'{label} 입력 완료'}
+
+    if code in SUB_REASONS:  # 사유 고르기 — 13개 목록 전에 보낸 버튼(C/U/X)
         back = {'text': '← 뒤로', 'callback_data': _cb(chat_id, short, 'b')}
         btns = [{'text': label, 'callback_data': _cb(chat_id, short, f'{code}{i + 1}')} for i, (label, _) in enumerate(SUB_REASONS[code])]
         rows = [btns[i:i + 2] for i in range(0, len(btns), 2)] + [[back]]

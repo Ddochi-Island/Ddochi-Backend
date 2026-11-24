@@ -96,7 +96,7 @@ def _outcome(row, next_row):
         return ''
     # 밀림은 '밀림(사유)'로 — 사유만 쓰면 밀림인지 안 보여서(2026-11-20 밀림 사유 추가)
     reason = (f"{row['result_label']}({row['sub_reason_label']})" if row['sub_reason_label'] else row['result_label']) \
-        if row['result'] == 'DELAY' else (row['sub_reason_label'] or row['result_label'])
+        if row['result'] in ('DELAY', 'SECOND_MEET') else (row['sub_reason_label'] or row['result_label'])
     text = f"{_MATCH_RESULT_ICON.get(row['result'], '')}{reason}"
     if row['result'] in _RESCHEDULE_RESULTS:
         text += f" ({_fmt_md(next_row['mt_date'] if next_row else None)})"

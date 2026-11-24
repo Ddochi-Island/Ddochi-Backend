@@ -489,7 +489,7 @@ def _outcome_text(r, with_delay_reason=False):
     """매칭 결과 표시 문구 — 사유가 있으면 사유(❌경계취소). 밀림은 화면이 '❌밀림' 문구로 카드를 나누니(MatchingScreen
     POSTPONE_MARKERS) 그대로 두고, 로그 줄에서만 사유를 괄호로(❌밀림(교사못구함)) — 2026-11-20 밀림 사유 추가."""
     icon = _MATCH_RESULT_ICON.get(r['result'], '')
-    if r['result'] == 'DELAY':
+    if r['result'] in ('DELAY', 'SECOND_MEET'):  # 2차만남(단기/장기)도 '⭕️2차만남' 문구 유지 — 카드 나누는 마커
         sub = r.get('sub_reason_label')
         return f"{icon}{r['result_label']}" + (f'({sub})' if with_delay_reason and sub else '')
     return f"{icon}{r['sub_reason_label'] or r['result_label']}"
@@ -503,9 +503,14 @@ _RESULT_SUB_REASON_MAP = {
     '환경비합': ('UNFIT', 'ENV_UNFIT'), '인성비합': ('UNFIT', 'PERSONALITY_UNFIT'),
     '정신질환': ('UNFIT', 'MENTAL_HEALTH'), '건강비합': ('UNFIT', 'HEALTH_UNFIT'),
     '경계탈락': ('DROPOUT', 'BOUNDARY_DROPOUT'), '갈부탈락': ('DROPOUT', 'CONFLICT_DROPOUT'),
+    # 2026-11-25 결과 13개 목록 — 취소/탈락 구분 없이 사유가 곧 결과(새 사유는 CANCEL 아래). 위 옛 문구는 열려 있던 화면 호환
+    '연락두절': ('CANCEL', 'CONTACT_LOST'), '갈급부족': ('CANCEL', 'LACK_OF_THIRST'), '경계심': ('CANCEL', 'WARINESS'),
+    '중복섭외': ('CANCEL', 'DUPLICATE_RECRUIT'), '병가': ('CANCEL', 'SICK_LEAVE'),
 }
 # 밀림 사유(2026-11-20) — 화면 문구 → MATCH_SUB_REASON_CODES.SUB_CODE(RESULT_CODE='DELAY'). 텔레그램 /r도 같은 순서
 DELAY_REASONS = {'섭외자미룸': 'DELAY_RECRUIT_POSTPONE', '교사못구함': 'DELAY_NO_TEACHER'}
+# 2차만남 단기/장기 — 입력한 사람이 고른 값(2026-11-25). 옛 기록은 날짜 간격으로 계산
+SECOND_TERMS = {'단기': 'SECOND_SHORT', '장기': 'SECOND_LONG'}
 
 
 @csrf_exempt
@@ -1121,7 +1126,7 @@ def record_match_result(client, sarang_id, result_val, sub_reason):
 def record_postpone(client, sarang_id, log_type, new_date, sabun, reason='', sub_reason=None):
     """밀림처리/2차만남 — 열린 시도를 마무리하고 다음 시도 행 추가(new_date 'YYYY-MM-DD HH:MM' 또는 미정/빈값).
     웹(postpone_meeting)과 텔레그램(/r_)이 공유. 열린 시도가 없으면 False.
-    sub_reason은 밀림 사유 코드(DELAY_REASONS 값) — 2차만남이면 무시."""
+    sub_reason은 밀림 사유(DELAY_REASONS 값) 또는 2차만남 단기/장기(SECOND_TERMS 값)."""
     result_code = 'DELAY' if log_type == '밀림처리' else 'SECOND_MEET'
     cur = client.query_one(
         """SELECT MATCH_ID, MATCH_DEGREE, ATTEMPT_COUNT, TEACHER_MEMBER_ID, MATCH_LOCATION
@@ -1139,7 +1144,7 @@ def record_postpone(client, sarang_id, log_type, new_date, sabun, reason='', sub
 
     stmts = [
         {'sql': "UPDATE SARANG_MATCH_HISTORIES SET RESULT = :1, SUB_REASON = :2, STATUS = 'FINISHED' WHERE MATCH_ID = :3",
-         'args': [result_code, sub_reason if result_code == 'DELAY' else None, cur['match_id']]},
+         'args': [result_code, sub_reason, cur['match_id']]},
         {'sql': "INSERT INTO SARANG_ACTIVITY_LOGS (ACTIVITY_ID, SARANG_ID, ACTOR_MEMBER_ID, EVENT_TYPE, CONTENT) VALUES (:1, :2, :3, :4, :5)",
          'args': [uuid.uuid4().hex.upper(), sarang_id, sabun, log_type, reason or None]},
     ]
@@ -1192,8 +1197,10 @@ def postpone_meeting(request, *args, **kwargs):
     sabun = request.user['sabun']
     client = DataRouterClient()
 
-    delay_sub = DELAY_REASONS.get(str(body.get('delayReason') or '').strip())  # 밀림 사유(없으면 옛 화면 — 사유 없이)
-    if not record_postpone(client, sarang_id, log_type, new_date, sabun, reason, delay_sub):
+    # 밀림 사유 / 2차만남 단기·장기(없으면 옛 화면 — 사유 없이). delayReason은 옛 화면 키
+    picked = str(body.get('subReason') or body.get('delayReason') or '').strip()
+    sub = (DELAY_REASONS if log_type == '밀림처리' else SECOND_TERMS).get(picked)
+    if not record_postpone(client, sarang_id, log_type, new_date, sabun, reason, sub):
         return JsonResponse({'success': False, 'message': '진행 중인 매칭 일정이 없어요'}, status=404)
 
     return JsonResponse({'success': True, 'message': f'{log_type} 처리 완료!'})

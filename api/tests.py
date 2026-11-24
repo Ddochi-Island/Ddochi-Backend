@@ -367,6 +367,22 @@ class TelegramMatchResultTests(SimpleTestCase):
         self.assertIn('#r_36017851D2', sent[-1][1]['text'])
         rmr.assert_not_called(); rp.assert_not_called()
 
+    def test_flat_list_buttons(self):
+        # 13개 목록(2026-11-25) — 끝나는 건 바로 저장, 2차 단기/장기는 날짜 안내에 꼬리표
+        from api.telegram.match_result_input import FLAT, _result_keyboard, parse_kind
+        self.assertEqual(len(FLAT), 13)
+        kb = _result_keyboard(-100123, '36017851')
+        self.assertEqual(sum(len(r) for r in kb['inline_keyboard']), 13)
+        _, sent, rmr, _ = self._run('E4')
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CANCEL', 'WARINESS')
+        self.assertIn('경계심 입력 완료', sent[-1][1]['text'])
+        _, sent, _, _ = self._run('S2')
+        self.assertIn('#r_36017851S2', sent[-1][1]['text'])
+        self.assertIn('2차만남(장기)', sent[-1][1]['text'])
+        _, _, _, rp = self._run('S10')
+        rp.assert_called_once_with(None, self.ROW['sarang_id'], '2차만남', '미정', 'actor', sub_reason='SECOND_SHORT')
+        self.assertEqual(parse_kind('S1'), ('S', ('단기', 'SECOND_SHORT')))
+
     def test_delay_reason_undecided_and_kind(self):
         from api.telegram.match_result_input import parse_kind
         _, sent, _, rp = self._run('D10')
