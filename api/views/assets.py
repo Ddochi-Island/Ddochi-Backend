@@ -510,6 +510,18 @@ _RESULT_SUB_REASON_MAP = {
     '연락두절': ('CANCEL', 'CONTACT_LOST'), '갈급부족': ('CANCEL', 'LACK_OF_THIRST'), '경계심': ('CANCEL', 'WARINESS'),
     '중복섭외': ('CANCEL', 'DUPLICATE_RECRUIT'), '병가': ('CANCEL', 'SICK_LEAVE'),
 }
+# 만났는지 물어보는 결과(2026-11-25) — 만났으면 ⭕️(탈락·비합), 안 만났으면 ❌(취소). 같은 사유 코드를 결과만 바꿔 저장
+MET_ASK = {'경계심': ('DROPOUT', 'WARINESS'), '중복섭외': ('DROPOUT', 'DUPLICATE_RECRUIT'),
+           '정신질환': ('UNFIT', 'MENTAL_HEALTH'), '인성비합': ('UNFIT', 'PERSONALITY_UNFIT')}
+
+
+def met_result(label, met):
+    """MET_ASK 결과 → (RESULT, SUB_REASON). met이 None(안 물어본 옛 화면)이면 예전 매핑 그대로."""
+    if label not in MET_ASK or met is None:
+        return _RESULT_SUB_REASON_MAP.get(label)
+    return MET_ASK[label] if met else ('CANCEL', MET_ASK[label][1])
+
+
 # 밀림 사유(2026-11-20) — 화면 문구 → MATCH_SUB_REASON_CODES.SUB_CODE(RESULT_CODE='DELAY'). 텔레그램 /r도 같은 순서
 DELAY_REASONS = {'섭외자미룸': 'DELAY_RECRUIT_POSTPONE', '교사못구함': 'DELAY_NO_TEACHER'}
 # 2차만남 단기/장기 — 입력한 사람이 고른 값(2026-11-25). 옛 기록은 날짜 간격으로 계산
@@ -594,7 +606,8 @@ def update_match(request, *args, **kwargs):
     if detail in ('상담연결', '상담따기'):  # 상담따기는 옛 이름(10/14 상담연결로 변경) — 열려 있던 화면 호환
         result_val, sub_reason = 'CONSULT_WIN', None
     else:
-        pair = _RESULT_SUB_REASON_MAP.get(detail)
+        met = data.get('met')
+        pair = met_result(detail, None if met is None else bool(met))
         result_val, sub_reason = pair if pair else (None, None)
     if not result_val:
         return JsonResponse({'success': False, 'message': f'알 수 없는 결과: {match_result}'}, status=400)

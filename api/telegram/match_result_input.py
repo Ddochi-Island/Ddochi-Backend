@@ -108,7 +108,7 @@ def start(client, short, chat_id, reply_to=None):
 def handle_callback(client, args, chat_id, message_id, actor_resolver):
     """버튼 탭. args = '<short>.<code>' — code: 상담연결 W, 2차 단기/장기 S1/S2, 밀림 D1/D2, 끝(E1~E8), 미정(S10/S20/D10/D20), 뒤로(b).
     옛 버튼(C/U/X·C1/U2…·D·S·S0)도 그대로 받음."""
-    from api.views.assets import record_match_result, record_postpone  # 순환 import 회피
+    from api.views.assets import MET_ASK, met_result, record_match_result, record_postpone  # 순환 import 회피
 
     short, _, code = str(args or '').partition('.')
     row = _find_open(client, short)
@@ -126,11 +126,21 @@ def handle_callback(client, args, chat_id, message_id, actor_resolver):
         _edit(chat_id, message_id, f'✅ {head}\n→ 상담연결 입력 완료')
         return {'toast': '상담연결 입력 완료'}
 
-    if len(code) >= 2 and code[0] == 'E' and code[1:].isdigit() and 1 <= int(code[1:]) <= len(ENDINGS):
-        label, result, sub = ENDINGS[int(code[1:]) - 1]
+    ending = re.fullmatch(r'E(\d+)([mn]?)', code)
+    if ending and 1 <= int(ending[1]) <= len(ENDINGS):
+        label, result, sub = ENDINGS[int(ending[1]) - 1]
+        if label in MET_ASK and not ending[2]:  # 경계심·중복섭외·정신질환·인성비합은 만났는지 먼저(2026-11-25) — ⭕️/❌ 구분
+            back = {'text': '← 뒤로', 'callback_data': _cb(chat_id, short, 'b')}
+            btns = [{'text': '만났어 ⭕️', 'callback_data': _cb(chat_id, short, f'{code}m')},
+                    {'text': '안 만났어 ❌', 'callback_data': _cb(chat_id, short, f'{code}n')}]
+            _edit(chat_id, message_id, f'{head}\n{label} — 섭외자를 만났어?', {'inline_keyboard': [btns, [back]]})
+            return {'toast': None}
+        if ending[2]:
+            result, sub = met_result(label, ending[2] == 'm')
         record_match_result(client, row['sarang_id'], result, sub)
-        _edit(chat_id, message_id, f'✅ {head}\n→ {label} 입력 완료')
-        return {'toast': f'{label} 입력 완료'}
+        shown = label + {'m': '(만남)', 'n': '(안 만남)'}.get(ending[2], '')
+        _edit(chat_id, message_id, f'✅ {head}\n→ {shown} 입력 완료')
+        return {'toast': f'{shown} 입력 완료'}
 
     if code in SUB_REASONS:  # 사유 고르기 — 13개 목록 전에 보낸 버튼(C/U/X)
         back = {'text': '← 뒤로', 'callback_data': _cb(chat_id, short, 'b')}

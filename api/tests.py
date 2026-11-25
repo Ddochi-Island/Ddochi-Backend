@@ -373,9 +373,9 @@ class TelegramMatchResultTests(SimpleTestCase):
         self.assertEqual(len(FLAT), 13)
         kb = _result_keyboard(-100123, '36017851')
         self.assertEqual(sum(len(r) for r in kb['inline_keyboard']), 13)
-        _, sent, rmr, _ = self._run('E4')
-        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CANCEL', 'WARINESS')
-        self.assertIn('경계심 입력 완료', sent[-1][1]['text'])
+        _, sent, rmr, _ = self._run('E2')  # 갈급부족은 바로 저장
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CANCEL', 'LACK_OF_THIRST')
+        self.assertIn('갈급부족 입력 완료', sent[-1][1]['text'])
         _, sent, _, _ = self._run('S2')
         self.assertIn('#r_36017851S2', sent[-1][1]['text'])
         self.assertIn('2차만남(장기)', sent[-1][1]['text'])
@@ -572,3 +572,25 @@ class MatchingCronSplitTests(SimpleTestCase):
         self.assertEqual(self._run({'exclude': ['수지역']}), {'1', '2'})
         self.assertEqual(self._run({'only': ['수지역']}), {'수지역'})
         self.assertEqual(self._run({}), {'1', '2', '수지역'})
+
+
+class MatchMetSplitTests(TelegramMatchResultTests):
+    """경계심·중복섭외·정신질환·인성비합 — 만났으면 ⭕️(탈락·비합), 안 만났으면 ❌(취소)(2026-11-25)"""
+
+    def test_met_result_mapping(self):
+        from api.views.assets import met_result
+        self.assertEqual(met_result('경계심', True), ('DROPOUT', 'WARINESS'))
+        self.assertEqual(met_result('경계심', False), ('CANCEL', 'WARINESS'))
+        self.assertEqual(met_result('정신질환', False), ('CANCEL', 'MENTAL_HEALTH'))
+        self.assertEqual(met_result('정신질환', None), ('UNFIT', 'MENTAL_HEALTH'))  # 안 물어본 옛 화면
+        self.assertEqual(met_result('갈급부족', True), ('CANCEL', 'LACK_OF_THIRST'))
+
+    def test_telegram_asks_then_records(self):
+        _, sent, rmr, _ = self._run('E4')
+        rmr.assert_not_called()
+        self.assertIn('섭외자를 만났어?', sent[-1][1]['text'])
+        _, sent, rmr, _ = self._run('E4m')
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'DROPOUT', 'WARINESS')
+        self.assertIn('경계심(만남) 입력 완료', sent[-1][1]['text'])
+        _, _, rmr, _ = self._run('E7n')
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CANCEL', 'PERSONALITY_UNFIT')
