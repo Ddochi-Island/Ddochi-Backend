@@ -530,6 +530,18 @@ class LastMeetDateTests(SimpleTestCase):
         # 밀림 다음 날짜가 아직 미정이면 마지막으로 잡혔던 날
         self.assertEqual(_match_summary([m(1, 1, '2026-11-24T14:00Z', 'DELAY'), m(1, 2, None)], None)['last_at'], '2026-11-24T14:00Z')
 
+    def test_meets_one_row_per_meeting(self):
+        from api.views.erp import _match_summary
+        m = lambda d, a, at, res=None, lab=None: {'match_degree': str(d), 'attempt_count': str(a), 'matched_at': at,
+                                                 'result': res, 'result_label': lab}
+        # 1차 11/28 → 2차 11/29: 두 줄, 1차 결과에 2차 날짜
+        meets = _match_summary([m(2, 1, '2026-11-29T14:00Z'), m(1, 1, '2026-11-28T14:00Z', 'SECOND_MEET', '2차만남')], None)['meets']
+        self.assertEqual([(x['stage'], x['at'][:10], x['result']) for x in meets],
+                         [('1차', '2026-11-28', '2차만남(11/29)'), ('2차', '2026-11-29', '진행 예정')])
+        self.assertEqual(meets[0]['term'], '단기')
+        # 이력 없음 → 합재양 예정일 한 줄
+        self.assertEqual(_match_summary([], '2026-11-24T14:00')['meets'][0]['at'], '2026-11-24T14:00')
+
 
 class MatchingBoardTests(SimpleTestCase):
     """지역 매칭현황판 — 2차 날짜 미정은 맨 아래 '언제 만나시나요', 수지역은 오늘~4일 뒤까지(2026-11-25)"""

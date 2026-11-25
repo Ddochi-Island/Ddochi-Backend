@@ -659,7 +659,20 @@ def _match_summary(matches, scheduled_at):
         return label(last([x for x in degree(d) if x['result'] == 'DELAY']))
     first_res = _with_second_date(or_delay(first, 1), first, last(degree(2)))
     later_res = or_delay(later, top) if later else ('', '')  # 2차 이상이 없으면 비움(1차 밀림이 이후 결과에 또 나오던 것 수정)
+
+    def meet_res(r):
+        """만남 한 번의 결과 — 2차만남은 다음 차수 날짜를 괄호로, 결과 전이면 진행 예정"""
+        if not r.get('result'):
+            return '진행 예정', ''
+        nxt = next((x for x in matches if int(x['match_degree'] or 0) == int(r['match_degree'] or 0) + 1
+                    and int(x['attempt_count'] or 0) == 1), None)
+        return _with_second_date(label(r), r, nxt)
+    # 만남마다 한 줄(2026-11-26 사용자 요청 — 현황판처럼 1차·2차·밀림 다음 시도를 각각), 차수·시도 순
+    meets = [{'stage': f"{r['match_degree']}차", 'at': r['matched_at'], 'result': res, 'term': term}
+             for r in sorted(matches, key=lambda x: (int(x['match_degree'] or 0), int(x['attempt_count'] or 0)))
+             for res, term in [meet_res(r)]]
     return {
+        'meets': meets or [{'stage': '1차', 'at': scheduled_at, 'result': '진행 예정', 'term': ''}],
         'first_at': (first or {}).get('matched_at') or scheduled_at,
         'first_result': first_res[0], 'first_term': first_res[1],
         'later_result': later_res[0] or ('진행 예정' if later else ''), 'later_term': later_res[1],
