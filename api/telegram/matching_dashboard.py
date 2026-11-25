@@ -170,15 +170,15 @@ def _build_text(team_id, rows):
             lines.append(f"<code>{r['pi_name'] or ''}|{r['guide_name'] or ''}|{r['teacher_name'] or ''}</code>")
         lines.append('')
 
-    if not is_all:
-        # 교사/결과 입력 명령 안내 — 행마다 코드 명령을 달면 현황판이 길고 지저분해서(사용자 요청 2026-10-08)
-        # 이름으로 쓰는 명령을 접이식으로 한 번만. <code>라 탭해도 바로 전송되지 않고 복사됨.
-        lines.append('<blockquote expandable>📝 명령어 안내 (눌러서 펼치기)\n'
-                     '🎓 교사 입력: <code>/t 섭외자 교사</code>\n'
-                     '   예) <code>/t 홍길동 김철수</code> · 타지역 교사 <code>/t 홍길동 김철수(타지역)</code> · 해제 <code>/t 홍길동 -</code>\n'
-                     '🛡️ 결과 입력: <code>/r 섭외자</code>\n'
-                     '   예) <code>/r 홍길동</code> → 버튼으로 결과 고르기(밀림·2차만남은 날짜를 답장으로)\n'
-                     '같은 이름이 여럿이면 봇이 날짜별로 골라 달라고 해요</blockquote>')
+    # 수지역 방에서도 입력하게(2026-11-25) — 수지역 방은 지역 설정에 없어 /t·/r이 전 지역에서 이름을 찾음
+    # 교사/결과 입력 명령 안내 — 행마다 코드 명령을 달면 현황판이 길고 지저분해서(사용자 요청 2026-10-08)
+    # 이름으로 쓰는 명령을 접이식으로 한 번만. <code>라 탭해도 바로 전송되지 않고 복사됨.
+    lines.append('<blockquote expandable>📝 명령어 안내 (눌러서 펼치기)\n'
+                 '🎓 교사 입력: <code>/t 섭외자 교사</code>\n'
+                 '   예) <code>/t 홍길동 김철수</code> · 타지역 교사 <code>/t 홍길동 김철수(타지역)</code> · 해제 <code>/t 홍길동 -</code>\n'
+                 '🛡️ 결과 입력: <code>/r 섭외자</code>\n'
+                 '   예) <code>/r 홍길동</code> → 버튼으로 결과 고르기(밀림·2차만남은 날짜를 답장으로)\n'
+                 '같은 이름이 여럿이면 봇이 날짜별로 골라 달라고 해요</blockquote>')
     lines.append('➖➖➖➖➖➖➖➖➖➖')
     text = '\n'.join(lines)
     return text[:4000] + ('\n…' if len(text) > 4000 else '')
