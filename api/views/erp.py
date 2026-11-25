@@ -707,7 +707,8 @@ def erp_match_list(client, body):
     frm, to = _dates(body)
     # basis: 'hap' 합당한자 날짜 / 'first' 최초만남 / 'last' 최종 만남일(2026-11-24) — 만남 날짜 기준은 매칭 이력에서 계산하는 값이라
     # 합당한자 날짜를 앞뒤로 넉넉히 넓혀 가져온 뒤 걸러냄
-    meet_key = {'first': 'first_at', 'last': 'last_at'}.get(body.get('basis'))
+    # 'meet'(2026-11-26): 만남마다 한 줄인 화면에서 그 만남일이 기간 안인 줄만 — 날짜 미정 줄은 같은 사람의 다른 만남이 기간 안이면 같이
+    meet_key = {'first': 'first_at', 'last': 'last_at', 'meet': 'meets'}.get(body.get('basis'))
     q_frm, q_to = (frm - datetime.timedelta(days=_FIRST_MEET_LOOKBACK_DAYS), to + datetime.timedelta(days=30)) if meet_key else (frm, to)
     # 처음 재가한 날. 6~8월 옮겨 온 데이터는 재가 기록이 없어 예전 기준(마지막 만남 픽스 날, 없으면 합재양 작성일)으로 대신함
     hap_at = f"""COALESCE((SELECT MIN(a.CREATED_AT) FROM SARANG_ACTIVITY_LOGS a WHERE a.SARANG_ID = s.SARANG_ID AND a.EVENT_TYPE = '재가처리'),
@@ -755,8 +756,13 @@ def erp_match_list(client, body):
         r['guide_group'] = groups.get((r['guide_region'], r['guide_district']))
         r['teacher_group'] = groups.get((r['teacher_region'], r['teacher_district']))
         r['hap_date'] = _hap_date(r['hap_at'])
-    if meet_key:  # 만남 날짜는 벽시계 시각이 Z 붙은 채라 날짜 부분만 비교
-        rows = [r for r in rows if r[meet_key] and frm.isoformat() <= r[meet_key][:10] <= to.isoformat()]
+    in_range = lambda at: bool(at) and frm.isoformat() <= at[:10] <= to.isoformat()  # 만남 날짜는 벽시계 시각이 Z 붙은 채라 날짜 부분만
+    if meet_key == 'meets':
+        for r in rows:
+            r['meets'] = [m for m in r['meets'] if in_range(m['at']) or not m['at']] if any(in_range(m['at']) for m in r['meets']) else []
+        rows = [r for r in rows if r['meets']]
+    elif meet_key:
+        rows = [r for r in rows if in_range(r[meet_key])]
     return {'rows': rows}
 
 
