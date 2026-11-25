@@ -6,7 +6,7 @@ from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.team_config import load_team_config
 from api.views.short_card import GROUP_SPROUT_GOAL, SPROUT_STAGES, _JOURNAL_FIELDS, _journal_stage
 
-TEAM_ID = '수지역'  # 수지역 매칭현황판과 같은 방("[대학] 전도시스템", matchingChatId)
+TEAM_ID = '수지역'  # "[대학] 전도시스템" 방(sproutChatId, 없으면 matchingChatId)
 _WEEK = ['월', '화', '수', '목', '금', '토', '일']
 EXTRA_CHAT_IDS = ('-1004402786308',)  # 같은 전광판을 함께 받는 방(10/12 추가)
 _MARKUP = {'inline_keyboard': [[{'text': '🏞️ 밭 관리하기에서 보기', 'url': 'https://page.ddochi.cloud/#/shortCardList'}]]}
@@ -131,7 +131,8 @@ def send_sprout_board(client, sample=False):
     cfg = load_team_config(client, TEAM_ID)
     blocks = build_blocks(client, sample)
     results = {}
-    chat_id = cfg.get('matchingChatId')
+    # 떡잎 전광판 방은 sproutChatId — 수지역 매칭현황판이 다른 채널로 옮겨가도 전도시스템 방에 남게(2026-11-25)
+    chat_id = cfg.get('sproutChatId') or cfg.get('matchingChatId')
     results['main'] = send_fresh_dashboard(
         client, TEAM_ID, chat_id, None, _MARKUP, cfg,
         'lastSproutBoardMsgId', 'lastSproutBoardMsgDate', 'sprout_board', rich_blocks=blocks,
