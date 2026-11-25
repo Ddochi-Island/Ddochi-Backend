@@ -288,7 +288,10 @@ def get_assets(request, *args, **kwargs):
                 nxt = hist_rows[i + 1] if i + 1 < len(hist_rows) else None
                 if nxt:
                     detail += f" ({nxt['mt_date'] or '미정'})"
-            line = f"{r['created_ts']} | 매칭결과 | {detail} | "
+            # 결과 시각 = 시도 행 생성과 만남 시각 중 늦은 쪽 — 결과 입력 시각 컬럼이 없어서 생성 시각만 쓰면
+            # 며칠 전에 잡힌 매칭은 결과 넣자마자 화면의 '48시간 지난 결과 숨김'에 걸려 사라졌음(2026-11-25)
+            met_ts = f"{r['mt_date'][2:].replace('-', '.')} {r['mt_time']}" if r['mt_date'] else ''
+            line = f"{max(r['created_ts'], met_ts)} | 매칭결과 | {detail} | "
             logs_by_id.setdefault(sid, []).append({'id': r['match_id'], 'source': 'match', 'text': line, 'sort_ts': r['sort_ts']})
     for sid in logs_by_id:
         logs_by_id[sid].sort(key=lambda x: x['sort_ts'], reverse=True)
