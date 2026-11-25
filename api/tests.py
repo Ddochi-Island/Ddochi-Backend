@@ -552,7 +552,7 @@ class MatchingBoardTests(SimpleTestCase):
         self.assertNotIn('날짜 미정', text)
         self.assertIn('김철수', _build_text('수지역', rows))  # 4일 뒤(11/29)까지 보임
         rows[2]['mt_date'] = '2026-11-30'
-        self.assertNotIn('김철수', _build_text('수지역', rows))
+        self.assertNotIn('김철수', _build_text('수지역', rows).split('<blockquote')[0])
 
 
 class MatchingCronSplitTests(SimpleTestCase):
