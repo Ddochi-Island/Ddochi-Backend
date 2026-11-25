@@ -510,7 +510,7 @@ _RESULT_SUB_REASON_MAP = {
     '정신질환': ('UNFIT', 'MENTAL_HEALTH'), '건강비합': ('UNFIT', 'HEALTH_UNFIT'),
     '경계탈락': ('DROPOUT', 'BOUNDARY_DROPOUT'), '갈부탈락': ('DROPOUT', 'CONFLICT_DROPOUT'),
     # 2026-11-25 결과 13개 목록 — 취소/탈락 구분 없이 사유가 곧 결과(새 사유는 CANCEL 아래). 위 옛 문구는 열려 있던 화면 호환
-    '연락두절': ('CANCEL', 'CONTACT_LOST'), '갈급부족': ('CANCEL', 'LACK_OF_THIRST'), '경계심': ('CANCEL', 'WARINESS'),
+    '연락두절': ('CANCEL', 'CONTACT_LOST'), '갈급부족': ('DROPOUT', 'LACK_OF_THIRST'), '경계심': ('CANCEL', 'WARINESS'),
     '중복섭외': ('CANCEL', 'DUPLICATE_RECRUIT'), '병가': ('CANCEL', 'SICK_LEAVE'),
 }
 # 만났는지 물어보는 결과(2026-11-25) — 만났으면 ⭕️(탈락·비합), 안 만났으면 ❌(취소). 같은 사유 코드를 결과만 바꿔 저장

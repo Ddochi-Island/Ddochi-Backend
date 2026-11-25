@@ -374,7 +374,7 @@ class TelegramMatchResultTests(SimpleTestCase):
         kb = _result_keyboard(-100123, '36017851')
         self.assertEqual(sum(len(r) for r in kb['inline_keyboard']), 13)
         _, sent, rmr, _ = self._run('E2')  # 갈급부족은 바로 저장
-        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CANCEL', 'LACK_OF_THIRST')
+        rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'DROPOUT', 'LACK_OF_THIRST')
         self.assertIn('갈급부족 입력 완료', sent[-1][1]['text'])
         _, sent, _, _ = self._run('S2')
         self.assertIn('#r_36017851S2', sent[-1][1]['text'])
@@ -583,7 +583,7 @@ class MatchMetSplitTests(TelegramMatchResultTests):
         self.assertEqual(met_result('경계심', False), ('CANCEL', 'WARINESS'))
         self.assertEqual(met_result('정신질환', False), ('CANCEL', 'MENTAL_HEALTH'))
         self.assertEqual(met_result('정신질환', None), ('UNFIT', 'MENTAL_HEALTH'))  # 안 물어본 옛 화면
-        self.assertEqual(met_result('갈급부족', True), ('CANCEL', 'LACK_OF_THIRST'))
+        self.assertEqual(met_result('갈급부족', True), ('DROPOUT', 'LACK_OF_THIRST'))
 
     def test_telegram_asks_then_records(self):
         _, sent, rmr, _ = self._run('E4')

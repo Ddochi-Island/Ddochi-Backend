@@ -29,7 +29,7 @@ POSTPONE = {'D': '밀림처리', 'S': '2차만남'}
 DELAY_REASONS = [('섭외자미룸', 'DELAY_RECRUIT_POSTPONE'), ('교사못구함', 'DELAY_NO_TEACHER')]
 # 2026-11-25 결과 13개 목록 — 버튼 순서 그대로. 날짜가 필요한 건 (코드, 라벨), 바로 끝나는 건 E번호로 저장
 SECOND_TERMS = [('단기', 'SECOND_SHORT'), ('장기', 'SECOND_LONG')]
-ENDINGS = [('연락두절', 'CANCEL', 'CONTACT_LOST'), ('갈급부족', 'CANCEL', 'LACK_OF_THIRST'), ('환경비합', 'UNFIT', 'ENV_UNFIT'),
+ENDINGS = [('연락두절', 'CANCEL', 'CONTACT_LOST'), ('갈급부족', 'DROPOUT', 'LACK_OF_THIRST'), ('환경비합', 'UNFIT', 'ENV_UNFIT'),
            ('경계심', 'CANCEL', 'WARINESS'), ('중복섭외', 'CANCEL', 'DUPLICATE_RECRUIT'), ('정신질환', 'UNFIT', 'MENTAL_HEALTH'),
            ('인성비합', 'UNFIT', 'PERSONALITY_UNFIT'), ('병가', 'CANCEL', 'SICK_LEAVE')]
 _E = {label: f'E{i + 1}' for i, (label, _, _) in enumerate(ENDINGS)}
