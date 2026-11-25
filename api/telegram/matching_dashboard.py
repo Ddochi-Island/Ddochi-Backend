@@ -135,8 +135,8 @@ def _build_text(team_id, rows):
                 continue
             if is_all and r['mt_date'] and not (window_start <= datetime.date.fromisoformat(r['mt_date']) <= window_end):
                 continue
-            # 직전 시도가 2차만남으로 넘어간 결과였다면, 이 행이 바로 그 2차만남 자리.
-            is_2cha = bool(prev and prev['result'] == 'SECOND_MEET')
+            # 2차 이상 차수면 ✌️ — 2차에서 밀려 같은 차수로 다시 잡힌 건도 포함
+            is_2cha = int(r['match_degree'] or 1) >= 2  # 2차에서 밀린 건(같은 차수 다음 시도)도 2차라 ✌️
             if not is_all and is_2cha and not r['mt_date'] and not r['result']:  # 지역 보드: 2차 날짜 미정은 맨 아래 따로 물어봄
                 ask.append(r)
                 continue
