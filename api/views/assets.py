@@ -212,6 +212,9 @@ def get_assets(request, *args, **kwargs):
                       JOIN SARANG_PERSONAL_INFO p2 ON p2.PERSONAL_INFO_ID = s2.PERSONAL_INFO_ID
                       JOIN SARANG_HAB_JAE_YANG h2 ON h2.SARANG_ID = s2.SARANG_ID AND h2.IS_ACTIVE = 1
                      WHERE p2.PHONE_NORMALIZED = spi.PHONE_NORMALIZED AND s2.SARANG_ID <> s.SARANG_ID AND s2.DELETED_AT IS NULL))
+              -- 재가됐는데 매칭 기록이 없는 건(2026-11-25 시트→또치 전환 때 시트 밖 매칭 기록을 지움)은 뺌 — 재가하면 1차 시도가 바로 생김
+              AND NOT (hj.APPROVAL_STATUS = 'approved'
+                       AND NOT EXISTS (SELECT 1 FROM SARANG_MATCH_HISTORIES mx WHERE mx.SARANG_ID = s.SARANG_ID))
             ORDER BY s.CREATED_AT DESC
             FETCH FIRST 1000 ROWS ONLY""",
         [team_id],
