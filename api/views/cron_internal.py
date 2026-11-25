@@ -157,9 +157,17 @@ def send_matching_dashboard(request, *args, **kwargs):
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
 
+    # 잡 payload로 대상 방을 나눔 — 지역판은 매시간, 수지역판은 3시간마다(2026-11-25 사용자 요청)
+    try:
+        body = json.loads(request.body or b'{}') or {}
+    except ValueError:
+        body = {}
+    only, exclude = body.get('only'), body.get('exclude') or []
     client = DataRouterClient()
     results = {}
     for team_id in list_prospect_chat_team_ids(client, 'sendMatchingDashboard'):
+        if (only and team_id not in only) or team_id in exclude:
+            continue
         try:
             results[team_id] = send_fresh_matching_dashboard(client, team_id)
         except Exception as e:

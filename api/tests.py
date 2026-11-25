@@ -553,3 +553,22 @@ class MatchingBoardTests(SimpleTestCase):
         self.assertIn('김철수', _build_text('수지역', rows))  # 4일 뒤(11/29)까지 보임
         rows[2]['mt_date'] = '2026-11-30'
         self.assertNotIn('김철수', _build_text('수지역', rows))
+
+
+class MatchingCronSplitTests(SimpleTestCase):
+    """매칭현황판 크론 payload로 방 나누기 — 지역판 매시간, 수지역판 3시간(2026-11-25)"""
+
+    def _run(self, body):
+        from django.test import RequestFactory
+        from api.views import cron_internal
+        req = RequestFactory().post('/internal/cron/send-matching-dashboard', data=json.dumps(body), content_type='application/json')
+        with patch.object(cron_internal, 'check_internal_auth', return_value=True), \
+                patch.object(cron_internal, 'DataRouterClient'), \
+                patch.object(cron_internal, 'list_prospect_chat_team_ids', return_value=['1', '2', '수지역']), \
+                patch.object(cron_internal, 'send_fresh_matching_dashboard', return_value={'sent': True}):
+            return set(json.loads(cron_internal.send_matching_dashboard(req).content)['results'])
+
+    def test_split(self):
+        self.assertEqual(self._run({'exclude': ['수지역']}), {'1', '2'})
+        self.assertEqual(self._run({'only': ['수지역']}), {'수지역'})
+        self.assertEqual(self._run({}), {'1', '2', '수지역'})
