@@ -56,10 +56,12 @@ def _fetch_rows(client, team_id):
         scope_clause = """AND EXISTS (
               SELECT 1 FROM SARANG_MATCH_HISTORIES x
                WHERE x.SARANG_ID = s.SARANG_ID
-                 AND x.MATCHED_AT BETWEEN TRUNC(SYSDATE) AND TRUNC(SYSDATE) + INTERVAL '4' DAY
+                 AND x.MATCHED_AT >= TRUNC(SYSDATE) AND x.MATCHED_AT < TRUNC(SYSDATE) + INTERVAL '5' DAY
             )"""
     else:
-        scope_clause = "AND s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY"
+        # 2차 이상 진행 중(결과 전)인 사람은 등록이 30일 넘었어도 계속 보임 — 2차는 날짜가 멀어도 띄움(2026-11-25 사용자 요청)
+        scope_clause = """AND (s.CREATED_AT >= SYSTIMESTAMP - INTERVAL '30' DAY OR EXISTS (
+              SELECT 1 FROM SARANG_MATCH_HISTORIES x WHERE x.SARANG_ID = s.SARANG_ID AND x.RESULT IS NULL AND x.MATCH_DEGREE >= 2))"""
     return client.query(
         f"""SELECT s.SARANG_ID, smh.MATCH_ID, smh.MATCH_DEGREE, smh.ATTEMPT_COUNT,
                   TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE,
@@ -111,17 +113,17 @@ def _build_text(team_id, rows):
     today = timezone.localdate()
     two_days_ago = today - datetime.timedelta(days=2)
     is_all = team_id == _ALL_REGIONS_TEAM_ID
-    # 수지역(전체) 보드는 만남 예정일 기준 오늘부터 3일 후까지(과거는 제외)만
+    # 수지역(전체) 보드는 만남 예정일 기준 오늘부터 4일 후까지(과거는 제외, 2026-11-25 3일→4일)만
     # 화면에 보임 — _fetch_rows는 사람 단위로만 넓게 가져오므로(prev/next 계산용)
     # 실제 표시 범위는 여기서 자름.
     window_start = today
-    window_end = today + datetime.timedelta(days=3)
+    window_end = today + datetime.timedelta(days=4)
 
     by_sarang = {}
     for r in rows:
         by_sarang.setdefault(r['sarang_id'], []).append(r)
 
-    groups = {}
+    groups, ask = {}, []
     for hist in by_sarang.values():
         for i, r in enumerate(hist):
             nxt = hist[i + 1] if i + 1 < len(hist) else None
@@ -135,6 +137,9 @@ def _build_text(team_id, rows):
                 continue
             # 직전 시도가 2차만남으로 넘어간 결과였다면, 이 행이 바로 그 2차만남 자리.
             is_2cha = bool(prev and prev['result'] == 'SECOND_MEET')
+            if not is_all and is_2cha and not r['mt_date'] and not r['result']:  # 지역 보드: 2차 날짜 미정은 맨 아래 따로 물어봄
+                ask.append(r)
+                continue
             key = r['mt_date'] or '미정'
             groups.setdefault(key, []).append({
                 'time': (r['mt_time'] or '-') + ('✌️' if is_2cha else ''),
@@ -145,7 +150,7 @@ def _build_text(team_id, rows):
 
     title = '📢 수지역 매칭 현황판' if is_all else f'📢 {team_id}지역 매칭 현황판'
     lines = ['➖➖➖➖➖➖➖➖➖➖', title, '']
-    if not groups:
+    if not groups and not ask:
         lines.append('예정된 매칭이 없어 😶')
     else:
         def sort_key(k):
@@ -159,6 +164,11 @@ def _build_text(team_id, rows):
                 region_prefix = f"{it['region']}지역|" if is_all else ''
                 lines.append(f"<code>{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
             lines.append('')
+    if ask:
+        lines.append('🤔 2차 언제 만나시나요~?')
+        for r in sorted(ask, key=lambda r: r['pi_name'] or ''):
+            lines.append(f"<code>{r['pi_name'] or ''}|{r['guide_name'] or ''}|{r['teacher_name'] or ''}</code>")
+        lines.append('')
 
     if not is_all:
         # 교사/결과 입력 명령 안내 — 행마다 코드 명령을 달면 현황판이 길고 지저분해서(사용자 요청 2026-10-08)

@@ -529,3 +529,27 @@ class LastMeetDateTests(SimpleTestCase):
         self.assertEqual(_match_summary([m(1, 1, '2026-11-24T14:00Z', 'SECOND_MEET'), m(2, 1, '2026-11-26T14:00Z')], None)['last_at'], '2026-11-26T14:00Z')
         # 밀림 다음 날짜가 아직 미정이면 마지막으로 잡혔던 날
         self.assertEqual(_match_summary([m(1, 1, '2026-11-24T14:00Z', 'DELAY'), m(1, 2, None)], None)['last_at'], '2026-11-24T14:00Z')
+
+
+class MatchingBoardTests(SimpleTestCase):
+    """지역 매칭현황판 — 2차 날짜 미정은 맨 아래 '언제 만나시나요', 수지역은 오늘~4일 뒤까지(2026-11-25)"""
+
+    def _row(self, sid, deg, date, result, name):
+        return {'sarang_id': sid, 'match_id': f'{sid}{deg}', 'match_degree': str(deg), 'attempt_count': '1',
+                'mt_date': date, 'mt_time': '17:00' if date else None, 'result': result,
+                'result_label': '2차만남' if result else None, 'sub_reason_label': None,
+                'pi_name': name, 'guide_name': '인도', 'teacher_name': '', 'region': '1'}
+
+    @patch('api.telegram.matching_dashboard.timezone.localdate')
+    def test_second_meet_undated_listed_at_bottom(self, today):
+        import datetime
+        from api.telegram.matching_dashboard import _build_text
+        today.return_value = datetime.date(2026, 11, 25)
+        rows = [self._row('A', 1, '2026-11-24', 'SECOND_MEET', '홍길동'), self._row('A', 2, None, None, '홍길동'),
+                self._row('B', 1, '2026-11-29', None, '김철수')]
+        text = _build_text('1', rows)
+        self.assertIn('🤔 2차 언제 만나시나요~?\n<code>홍길동|인도|</code>', text)
+        self.assertNotIn('날짜 미정', text)
+        self.assertIn('김철수', _build_text('수지역', rows))  # 4일 뒤(11/29)까지 보임
+        rows[2]['mt_date'] = '2026-11-30'
+        self.assertNotIn('김철수', _build_text('수지역', rows))
