@@ -714,6 +714,8 @@ def erp_match_list(client, body):
           LEFT JOIN MEMBERS tm ON tm.MEMBER_ID = h.TEACHER_MEMBER_ID
           LEFT JOIN MEMBER_AFFILIATION_HISTORIES tmah ON tmah.MEMBER_ID = h.TEACHER_MEMBER_ID AND tmah.IS_CURRENT = 1
          WHERE s.DELETED_AT IS NULL AND h.APPROVAL_STATUS = 'approved' AND {_in_range(hap_at)}
+           -- 매칭 기록이 있는 사람만(2026-11-25 시트→또치 전환 때 시트 밖 매칭 기록을 지움 — 재가하면 1차 시도가 바로 생김)
+           AND EXISTS (SELECT 1 FROM SARANG_MATCH_HISTORIES mx WHERE mx.SARANG_ID = s.SARANG_ID)
          ORDER BY HAP_AT""", [q_frm.isoformat(), q_to.isoformat()], fetch_limit=20000)
     matches = {}
     ids = [r['sarang_id'] for r in rows]
