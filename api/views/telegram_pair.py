@@ -38,6 +38,8 @@ CHANNEL_DEFS = {
     'shedUnified':     {'field': 'shedUnifiedChatId', 'label': '통합현황판', 'lastMsgIdField': 'lastShedMsgId'},
     'tmDash':          {'field': 'tmDashChatId', 'label': 'TM현황', 'lastMsgIdField': 'lastTmMsgId'},
     'schedDash':       {'field': 'schedDashChatId', 'label': '예약타임테이블', 'lastMsgIdField': 'lastSchedMsgId'},
+    # 교사 급구 — 수지역 탭에서만 연결(2026-11-26). 합재양 카드와 목록을 올리는 방
+    'teacherUrgent':   {'field': 'teacherUrgentChatId', 'label': '교사 급구', 'lastMsgIdField': 'lastTeacherUrgentMsgId'},
 }
 
 

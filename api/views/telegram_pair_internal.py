@@ -42,6 +42,7 @@ _WELCOME = {
     'activityCoord':   {'text': lambda t: f"🫵 [{t}] 활동소통 방이 연결되었어! '대학 너 나와' 메시지가 이곳에 발송돼."},
     'sheetDashboard':  {'text': lambda t: f'📋 [{t}] 섭외 명단 대시보드 방이 연결되었어! 매일 09:00에 새로운 유입 + 부재중 현황이 발송돼.'},
     'talkDashboard':   {'text': lambda t: f'🗣️ [{t}] 말걸기 대시보드 방이 연결되었어! 일일보고 제출 시 자동으로 갱신돼.'},
+    'teacherUrgent':   {'text': lambda t: f'🆘 [{t}] 교사 급구 방이 연결되었어! 교사가 필요한 매칭이 이곳에 올라와.'},
 }
 
 
