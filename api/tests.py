@@ -606,3 +606,13 @@ class MatchMetSplitTests(TelegramMatchResultTests):
         self.assertIn('경계심(만남) 입력 완료', sent[-1][1]['text'])
         _, _, rmr, _ = self._run('E7n')
         rmr.assert_called_once_with(None, self.ROW['sarang_id'], 'CANCEL', 'PERSONALITY_UNFIT')
+
+
+class TeacherUrgentTests(SimpleTestCase):
+    def test_line_format(self):
+        from api.telegram.teacher_urgent import build_text
+        r = lambda **k: {'sarang_id': 'A', 'region': '3', 'gender': '여', 'age': '20', 'mbti': 'enfj', 'mt_date': '2026-11-26',
+                         'mt_time': '16:00', 'match_location': '사당역 6출', 'revolution': '0', **k}
+        text = build_text([r(), r(sarang_id='B', mt_time='13:30', revolution='1', match_location='사당(페니힐스)')], {'A': 'https://t.me/c/1/2'})
+        self.assertIn('■ 11/26(목)\n3지역 여 20살 16시 사당 ENFJ\nhttps://t.me/c/1/2', text)
+        self.assertIn('🔫3지역 여 20살 13:30 사당 ENFJ', text)

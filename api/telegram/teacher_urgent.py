@@ -1,0 +1,51 @@
+# 교사 급구 — 오늘~3일 뒤 매칭 중 교사가 안 정해진 건을 "N지역 성별 N살 N시 장소 MBTI" 목록으로(2026-11-26)
+from api.telegram.matching_dashboard import _fmt_md
+
+# 인도자가 이 직책이면 줄 앞에 🔫 (혁명특전대 — 사용자가 '혁명반'이라 부름)
+_REVOLUTION_CODES = ('disp_special_forces', 'disp_special_forces_lead')
+
+
+def fetch_rows(client):
+    """교사 미정(합재양 교사·타지역 교사 둘 다 비어 있음)이고 결과 전인 매칭 시도 중 만남일이 오늘~3일 뒤인 것."""
+    marks = ', '.join(f"'{c}'" for c in _REVOLUTION_CODES)
+    return client.query(
+        f"""SELECT s.SARANG_ID, s.GENDER, s.AGE, s.MBTI, mah.REGION_CODE AS REGION,
+                  TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD') AS MT_DATE, TO_CHAR(smh.MATCHED_AT, 'HH24:MI') AS MT_TIME,
+                  smh.MATCH_LOCATION, hj.TELEGRAM_MSG_ID,
+                  CASE WHEN EXISTS (SELECT 1 FROM MEMBER_POSITION_MAPPINGS p WHERE p.MEMBER_ID = hj.GUIDE_MEMBER_ID
+                                     AND p.POSITION_CODE IN ({marks})) THEN 1 ELSE 0 END AS REVOLUTION
+             FROM SARANG s
+             JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1 AND hj.APPROVAL_STATUS = 'approved'
+             JOIN SARANG_MATCH_HISTORIES smh ON smh.SARANG_ID = s.SARANG_ID AND smh.RESULT IS NULL
+             JOIN MEMBER_AFFILIATION_HISTORIES mah ON mah.MEMBER_ID = hj.GUIDE_MEMBER_ID AND mah.IS_CURRENT = 1
+            WHERE s.DELETED_AT IS NULL AND hj.TEACHER_MEMBER_ID IS NULL AND hj.TEACHER_NAME_OVERRIDE IS NULL
+              AND smh.MATCHED_AT >= TRUNC(SYSDATE) AND smh.MATCHED_AT < TRUNC(SYSDATE) + INTERVAL '4' DAY
+            ORDER BY smh.MATCHED_AT""",
+        [],
+    )
+
+
+def _line(r):
+    from api.views.erp import _norm_place  # erp가 views 쪽이라 호출 때 가져옴
+    t = r['mt_time'] or ''
+    when = f'{int(t[:2])}시' if t.endswith(':00') else t
+    parts = [f"{r['region']}지역", r['gender'] or '', f"{r['age']}살" if r['age'] else '', when,
+             _norm_place(r['match_location'].split('(')[0]) if r['match_location'] else '', (r['mbti'] or '').upper()]
+    return ('🔫' if str(r['revolution']) == '1' else '') + ' '.join(p for p in parts if p)
+
+
+def build_text(rows, links=None):
+    """날짜별 ■ 묶음, 줄 아래 합재양 카드 링크(links: sarang_id → URL, 없으면 줄만)."""
+    links = links or {}
+    lines, day = ['🆘 교사 급구'], None
+    for r in rows:
+        if r['mt_date'] != day:
+            day = r['mt_date']
+            lines += ['', f'■ {_fmt_md(day)}']
+        lines.append(_line(r))
+        if links.get(r['sarang_id']):
+            lines.append(links[r['sarang_id']])
+            lines.append('')
+    if len(lines) == 1:
+        lines.append('\n교사가 필요한 매칭이 없어요 🎉')
+    return '\n'.join(lines).rstrip()
