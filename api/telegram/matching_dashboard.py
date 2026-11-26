@@ -201,7 +201,8 @@ def refresh_matching_dashboard(client, team_id, allow_create=True):
     """매칭현황판 리스트 갱신 — prospect_dashboard.refresh_prospect_dashboard와 동일한
     edit-우선/allow_create 패턴. 06~23시 발송 시간대 밖이면 웹 이벤트로 인한 갱신도
     건너뜀 — 그 시간대 메시지는 전날 마감 기록이라 더 이상 안 건드림."""
-    if not in_broadcast_window():
+    # 수지역 판은 00시에도 새로 올라가서(2026-11-25) 00~06시 입력도 그 판에 반영 — 지역 판은 전날 마감 기록이라 그대로 06~23시만
+    if not in_broadcast_window(0 if team_id == _ALL_REGIONS_TEAM_ID else 6):
         return {'skipped': True, 'reason': 'outside_broadcast_window'}
 
     cfg = load_team_config(client, team_id)
