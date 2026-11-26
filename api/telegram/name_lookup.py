@@ -24,21 +24,25 @@ def regions_for_chat(client, chat_id):
     return out or None
 
 
-def find_open_matches(client, name, chat_id, past_only=False):
+def find_open_matches(client, name, chat_id, past_only=False, finished=False):
     """이름이 같은 사랑이 중 결과 없는(열린) 매칭이 있는 건 — [{sarang_id, short, name, mt, guide}].
-    지역은 매칭 현황판과 같은 기준(인도자 → 유입자 → 담당자 소속). past_only면 만남 시각이 지난 건만."""
+    지역은 매칭 현황판과 같은 기준(인도자 → 유입자 → 담당자 소속). past_only면 만남 시각이 지난 건만.
+    finished면 열린 시도 대신 가장 최근 시도로(결과가 다 들어간 사람 — /r 결과 수정, 2026-11-27)."""
     regions = regions_for_chat(client, chat_id)
     region_sql, args = '', [name.strip()]
     if regions:
         marks = ', '.join(f':{i + 2}' for i in range(len(regions)))
         region_sql = f'AND mah.REGION_CODE IN ({marks})'
         args += regions
+    match_join = ('''smh.MATCH_ID = (SELECT z.MATCH_ID FROM SARANG_MATCH_HISTORIES z WHERE z.SARANG_ID = s.SARANG_ID
+                       ORDER BY z.MATCH_DEGREE DESC, z.ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY)''' if finished
+                  else 'smh.RESULT IS NULL')
     rows = client.query(
         f"""SELECT s.SARANG_ID, spi.NAME, gm.NAME AS GUIDE,
                    TO_CHAR(smh.MATCHED_AT, 'YYYY-MM-DD HH24:MI') AS MT
               FROM SARANG s
               JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
-              JOIN SARANG_MATCH_HISTORIES smh ON smh.SARANG_ID = s.SARANG_ID AND smh.RESULT IS NULL
+              JOIN SARANG_MATCH_HISTORIES smh ON smh.SARANG_ID = s.SARANG_ID AND {match_join}
               JOIN SARANG_HAB_JAE_YANG hj ON hj.SARANG_ID = s.SARANG_ID AND hj.IS_ACTIVE = 1
               LEFT JOIN MEMBERS gm ON gm.MEMBER_ID = hj.GUIDE_MEMBER_ID
               JOIN MEMBER_AFFILIATION_HISTORIES mah

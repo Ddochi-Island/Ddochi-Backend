@@ -257,7 +257,7 @@ def telegram_match_result(request, *args, **kwargs):
     client = DataRouterClient()
     name = str(body.get('name') or '').strip()
     if name and not short and chat_id is not None:  # "/r 섭외자"
-        found = find_open_matches(client, name, chat_id)
+        found = find_open_matches(client, name, chat_id) or find_open_matches(client, name, chat_id, finished=True)
         if len(found) != 1:
             text = (_pick_message(name, found, 'r') if found
                     else f'⚠️ [{name}] 결과를 넣을 매칭을 이 지역에서 못 찾았어')

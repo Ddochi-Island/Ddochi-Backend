@@ -1142,6 +1142,35 @@ def record_match_result(client, sarang_id, result_val, sub_reason):
     return True
 
 
+def reopen_last_result(client, sarang_id):
+    """가장 최근에 입력된 결과를 되돌림(텔레그램 /r 결과 수정, 2026-11-27) — 그 결과로 생긴 다음 시도(밀림·2차만남, 아직 결과 전)는 지우고
+    그 시도를 결과 전으로. 되돌린 결과 라벨, 결과가 없으면 None. 단계(매칭·상따)는 되돌리지 않음."""
+    last = client.query_one(
+        """SELECT smh.MATCH_ID, smh.MATCH_DEGREE D, smh.ATTEMPT_COUNT N, smh.RESULT, COALESCE(msrc.LABEL, mrc.LABEL) AS LABEL
+             FROM SARANG_MATCH_HISTORIES smh
+             LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = smh.RESULT
+             LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
+            WHERE smh.SARANG_ID = :1 AND smh.RESULT IS NOT NULL
+            ORDER BY smh.MATCH_DEGREE DESC, smh.ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
+        [sarang_id],
+    )
+    if not last:
+        return None
+    d, n = int(last['d']), int(last['n'])
+    client.tx([
+        # 이 결과 뒤에 생긴 시도(결과 전) — 밀림이면 같은 차수 다음 시도, 2차만남이면 다음 차수
+        {'sql': """DELETE FROM SARANG_MATCH_HISTORIES WHERE SARANG_ID = :1 AND RESULT IS NULL
+                      AND (MATCH_DEGREE > :2 OR (MATCH_DEGREE = :3 AND ATTEMPT_COUNT > :4))""", 'args': [sarang_id, d, d, n]},
+        {'sql': "UPDATE SARANG_MATCH_HISTORIES SET RESULT = NULL, SUB_REASON = NULL, STATUS = 'SCHEDULED' WHERE MATCH_ID = :1",
+         'args': [last['match_id']]},
+    ])
+    try:
+        refresh_matching_dashboard_for_sarang(client, sarang_id)
+    except Exception:
+        logging.getLogger('api.views.assets').warning('[reopen_last_result] matching dashboard refresh failed', exc_info=True)
+    return last['label'] or last['result']
+
+
 def record_postpone(client, sarang_id, log_type, new_date, sabun, reason='', sub_reason=None):
     """밀림처리/2차만남 — 열린 시도를 마무리하고 다음 시도 행 추가(new_date 'YYYY-MM-DD HH:MM' 또는 미정/빈값).
     웹(postpone_meeting)과 텔레그램(/r_)이 공유. 열린 시도가 없으면 False.

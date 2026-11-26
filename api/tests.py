@@ -616,3 +616,19 @@ class TeacherUrgentTests(SimpleTestCase):
         text = build_text([r(), r(sarang_id='B', mt_time='13:30', revolution='1', match_location='사당(페니힐스)')], {'A': 'https://t.me/c/1/2'})
         self.assertIn('■ 11/26(목)\n3지역 여 20살 16시 사당 ENFJ\nhttps://t.me/c/1/2', text)
         self.assertIn('🔫3지역 여 20살 13:30 사당 ENFJ', text)
+
+
+class ReopenLastResultTests(SimpleTestCase):
+    def test_reopen_deletes_followup_and_clears_result(self):
+        from unittest.mock import MagicMock, patch
+        from api.views.assets import reopen_last_result
+        client = MagicMock()
+        client.query_one.return_value = {'match_id': 'M1', 'd': '1', 'n': '1', 'result': 'SECOND_MEET', 'label': '단기'}
+        with patch('api.views.assets.refresh_matching_dashboard_for_sarang'):
+            self.assertEqual(reopen_last_result(client, 'S'), '단기')
+        stmts = client.tx.call_args[0][0]
+        self.assertIn('DELETE', stmts[0]['sql'])
+        self.assertEqual(stmts[0]['args'], ['S', 1, 1, 1])  # 다음 차수 또는 같은 차수 뒤 시도(결과 전)
+        self.assertEqual(stmts[1]['args'], ['M1'])
+        client.query_one.return_value = None
+        self.assertIsNone(reopen_last_result(client, 'S'))

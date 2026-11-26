@@ -96,21 +96,59 @@ def _edit(chat_id, message_id, text, markup=None):
     })
 
 
+def _last_result(client, short):
+    """가장 최근에 입력된 결과(라벨) — 수정 버튼에 보여줌. 없으면 None."""
+    r = client.query_one(
+        """SELECT s.SARANG_ID, spi.NAME, TO_CHAR(smh.MATCHED_AT, 'MM/DD HH24:MI') AS MT, COALESCE(msrc.LABEL, mrc.LABEL) AS LABEL
+             FROM SARANG s
+             JOIN SARANG_PERSONAL_INFO spi ON spi.PERSONAL_INFO_ID = s.PERSONAL_INFO_ID
+             JOIN SARANG_MATCH_HISTORIES smh ON smh.SARANG_ID = s.SARANG_ID AND smh.RESULT IS NOT NULL
+             LEFT JOIN MATCH_RESULT_CODES mrc ON mrc.RESULT_CODE = smh.RESULT
+             LEFT JOIN MATCH_SUB_REASON_CODES msrc ON msrc.RESULT_CODE = smh.RESULT AND msrc.SUB_CODE = smh.SUB_REASON
+            WHERE UPPER(SUBSTR(s.SARANG_ID, -8)) = UPPER(:1) AND s.DELETED_AT IS NULL
+            ORDER BY smh.MATCH_DEGREE DESC, smh.ATTEMPT_COUNT DESC FETCH FIRST 1 ROWS ONLY""",
+        [short],
+    )
+    return r
+
+
+def _edit_button(chat_id, short, label):
+    return [{'text': f'✏️ 직전 결과({label}) 수정', 'callback_data': _cb(chat_id, short, 'R')}]
+
+
 def start(client, short, chat_id, reply_to=None):
-    """/r_ 명령 — 결과 고르는 버튼 메시지를 보냄."""
-    row = _find_open(client, short)
-    if not row:
-        _send(chat_id, '⚠️ 결과를 넣을 매칭 일정을 못 찾았어(이미 입력됐거나 잘못된 링크일 수 있어)', reply_to=reply_to)
+    """/r_ 명령 — 결과 고르는 버튼 메시지를 보냄. 이미 입력된 결과가 있으면 '직전 결과 수정' 버튼도(2026-11-27)."""
+    short = short.upper()
+    row, last = _find_open(client, short), _last_result(client, short)
+    if not row and not last:
+        _send(chat_id, '⚠️ 결과를 넣을 매칭 일정을 못 찾았어(잘못된 링크일 수 있어)', reply_to=reply_to)
         return
-    _send(chat_id, _head(row) + '\n결과를 골라줘', _result_keyboard(chat_id, short.upper()), reply_to)
+    if not row:  # 결과가 다 들어간 사람 — 수정만
+        _send(chat_id, _head(last) + f"\n이미 <b>{html.escape(last['label'] or '-')}</b>(으)로 입력돼 있어",
+              {'inline_keyboard': [_edit_button(chat_id, short, last['label'] or '-')]}, reply_to)
+        return
+    markup = _result_keyboard(chat_id, short)
+    if last:
+        markup['inline_keyboard'].append(_edit_button(chat_id, short, last['label'] or '-'))
+    _send(chat_id, _head(row) + '\n결과를 골라줘', markup, reply_to)
 
 
 def handle_callback(client, args, chat_id, message_id, actor_resolver):
     """버튼 탭. args = '<short>.<code>' — code: 상담연결 W, 2차 단기/장기 S1/S2, 밀림 D1/D2, 끝(E1~E8), 미정(S10/S20/D10/D20), 뒤로(b).
     옛 버튼(C/U/X·C1/U2…·D·S·S0)도 그대로 받음."""
-    from api.views.assets import MET_ASK, met_result, record_match_result, record_postpone  # 순환 import 회피
+    from api.views.assets import MET_ASK, met_result, record_match_result, record_postpone, reopen_last_result  # 순환 import 회피
 
     short, _, code = str(args or '').partition('.')
+    if code == 'R':  # 직전 결과 수정 — 되돌리고 결과 버튼을 다시 보여줌
+        last = _last_result(client, short)
+        if not last:
+            _edit(chat_id, message_id, '⚠️ 수정할 결과가 없어')
+            return {'toast': '수정할 결과가 없어'}
+        reopen_last_result(client, last['sarang_id'])
+        row = _find_open(client, short)
+        _edit(chat_id, message_id, _head(row) + f"\n✏️ {html.escape(last['label'] or '-')} 결과를 지웠어. 새 결과를 골라줘",
+              _result_keyboard(chat_id, short))
+        return {'toast': '새 결과를 골라줘'}
     row = _find_open(client, short)
     if not row:
         _edit(chat_id, message_id, '⚠️ 이미 결과가 들어갔거나 일정이 없어')
