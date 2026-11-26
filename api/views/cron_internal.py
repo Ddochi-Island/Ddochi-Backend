@@ -371,6 +371,17 @@ def update_shed_246_sched_dashboard(request, *args, **kwargs):
 
 
 @csrf_exempt
+def send_teacher_urgent_view(request, *args, **kwargs):
+    """09·13·18시 — 교사 급구(수지역 teacherUrgentChatId 방)."""
+    if request.method not in ['POST']:
+        return JsonResponse({"error": "method_not_allowed"}, status=405)
+    if not check_internal_auth(request):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+    from api.telegram.teacher_urgent import send_teacher_urgent
+    return JsonResponse({'success': True, 'result': send_teacher_urgent(DataRouterClient())})
+
+
+@csrf_exempt
 def send_sprout_board_view(request, *args, **kwargs):
     """매일 22시 — 수지역 떡잎 전광판("[대학] 전도시스템" 방)."""
     if request.method not in ['POST']:

@@ -24,7 +24,7 @@ def in_broadcast_window(start_hour=6, end_hour=23):
 
 
 def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, msg_id_field, msg_date_field, log_tag,
-                         rich_blocks=None):
+                         rich_blocks=None, no_link_preview=False):
     """cfg는 호출부가 이미 조회해둔 team config — chat_id/이전 메시지 정보 재사용.
     rich_blocks를 주면 text 대신 sendRichMessage(Bot API 10.1 블록 — 표/접이식/제목)로 보냄. 리치 메시지에
     인라인 버튼이 거부되면 버튼 없이 한 번 더 시도."""
@@ -33,6 +33,8 @@ def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, 
         method, payload = 'sendRichMessage', {'chat_id': chat_id, 'rich_message': {'blocks': rich_blocks}, 'reply_markup': reply_markup}
     else:
         method, payload = 'sendMessage', {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': reply_markup}
+        if no_link_preview:  # 메시지 링크가 여럿인 목록 — 첫 링크 미리보기가 크게 붙지 않게
+            payload['link_preview_options'] = {'is_disabled': True}
     try:
         result = tel_router_client.enqueue(method, payload, await_result=True)
         if not result.get('ok') and rich_blocks is not None:

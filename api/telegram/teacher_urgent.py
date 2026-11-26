@@ -1,5 +1,13 @@
 # 교사 급구 — 오늘~3일 뒤 매칭 중 교사가 안 정해진 건을 "N지역 성별 N살 N시 장소 MBTI" 목록으로(2026-11-26)
+import logging
+
+from api.telegram import tel_router_client
+from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.matching_dashboard import _fmt_md
+from api.telegram.team_config import load_team_config, patch_team_config
+
+logger = logging.getLogger('api.telegram.teacher_urgent')
+TEAM_ID = '수지역'  # 교사 급구 방은 수지역 설정의 teacherUrgentChatId(텔레그램 연결 창 수지역 탭)
 
 # 인도자가 이 직책이면 줄 앞에 🔫 (혁명특전대 — 사용자가 '혁명반'이라 부름)
 _REVOLUTION_CODES = ('disp_special_forces', 'disp_special_forces_lead')
@@ -49,3 +57,40 @@ def build_text(rows, links=None):
     if len(lines) == 1:
         lines.append('\n교사가 필요한 매칭이 없어요 🎉')
     return '\n'.join(lines).rstrip()
+
+
+def _msg_link(chat_id, msg_id):
+    """비공개 그룹 메시지 링크 — chat_id -100xxxx → t.me/c/xxxx/<id>"""
+    return f"https://t.me/c/{str(chat_id).removeprefix('-100')}/{msg_id}"
+
+
+def send_teacher_urgent(client):
+    """하루 3번(09·13·18시) — 목록에 있는 사람의 합재양 카드를 급구 방에 (처음 한 번만) 올리고, 카드 링크를 단 목록을 새 메시지로."""
+    from api.telegram.habjaeyang import _build_text as card_text, _fetch as card_row  # 순환 import 회피
+
+    cfg = load_team_config(client, TEAM_ID)
+    chat_id = cfg.get('teacherUrgentChatId')
+    if not chat_id:
+        return {'skipped': True, 'reason': 'no_chat_id'}
+    rows = fetch_rows(client)
+    posted = {k: v for k, v in (cfg.get('teacherUrgentCards') or {}).items()}  # sarang_id → 카드 메시지 id
+    for sid in dict.fromkeys(r['sarang_id'] for r in rows):
+        if sid in posted:
+            continue
+        row = card_row(client, sid)
+        if not row:
+            continue
+        try:
+            res = tel_router_client.enqueue('sendMessage', {'chat_id': chat_id, 'text': card_text(row), 'parse_mode': 'HTML'},
+                                            await_result=True)
+        except Exception:
+            logger.warning('[teacher_urgent] card send failed', exc_info=True)
+            continue
+        if res.get('ok'):
+            posted[sid] = res['result']['message_id']
+    # 지금 목록에 있는 사람만 남김 — 교사가 정해져 빠졌다가 다시 들어오면 카드를 새로 올림
+    keep = {sid: posted[sid] for sid in dict.fromkeys(r['sarang_id'] for r in rows) if sid in posted}
+    patch_team_config(client, TEAM_ID, {'teacherUrgentCards': keep}, 'system')
+    text = build_text(rows, {sid: _msg_link(chat_id, mid) for sid, mid in keep.items()})
+    return send_fresh_dashboard(client, TEAM_ID, chat_id, text, None, cfg, 'lastTeacherUrgentMsgId', 'lastTeacherUrgentMsgDate',
+                                'teacher_urgent', no_link_preview=True)

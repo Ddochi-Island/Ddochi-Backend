@@ -646,3 +646,20 @@ class MatchingExtraChatTests(SimpleTestCase):
             sf.reset_mock()
             md.send_fresh_matching_dashboard(MagicMock(), '3')
             self.assertEqual(len(sf.call_args_list), 1)  # 지역 판은 그대로 한 방
+
+
+class TeacherUrgentSendTests(SimpleTestCase):
+    def test_posts_card_once_then_list_with_links(self):
+        from unittest.mock import MagicMock, patch
+        from api.telegram import teacher_urgent as tu
+        row = {'sarang_id': 'A', 'region': '3', 'gender': '여', 'age': '20', 'mbti': 'ENFJ', 'mt_date': '2026-11-27',
+               'mt_time': '16:00', 'match_location': '사당', 'revolution': '0'}
+        cfg = {'teacherUrgentChatId': '-1003763878670', 'teacherUrgentCards': {'GONE': 1}}
+        with patch.object(tu, 'load_team_config', return_value=cfg), patch.object(tu, 'fetch_rows', return_value=[row]), \
+                patch.object(tu, 'patch_team_config') as ptc, patch.object(tu, 'send_fresh_dashboard', return_value={'sent': True}) as sf, \
+                patch.object(tu.tel_router_client, 'enqueue', return_value={'ok': True, 'result': {'message_id': 77}}) as enq, \
+                patch('api.telegram.habjaeyang._fetch', return_value={'x': 1}), patch('api.telegram.habjaeyang._build_text', return_value='카드'):
+            tu.send_teacher_urgent(MagicMock())
+        self.assertEqual(enq.call_count, 1)  # 카드 한 장
+        self.assertEqual(ptc.call_args[0][2], {'teacherUrgentCards': {'A': 77}})  # 목록에서 빠진 GONE은 정리
+        self.assertIn('https://t.me/c/3763878670/77', sf.call_args[0][3])
