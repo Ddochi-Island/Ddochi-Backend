@@ -632,3 +632,17 @@ class ReopenLastResultTests(SimpleTestCase):
         self.assertEqual(stmts[1]['args'], ['M1'])
         client.query_one.return_value = None
         self.assertIsNone(reopen_last_result(client, 'S'))
+
+
+class MatchingExtraChatTests(SimpleTestCase):
+    def test_all_regions_board_also_goes_to_previous_chat(self):
+        from unittest.mock import MagicMock, patch
+        from api.telegram import matching_dashboard as md
+        cfg = {'matchingChatId': '-100NEW'}
+        with patch.object(md, 'load_team_config', return_value=cfg), patch.object(md, '_fetch_rows', return_value=[]), \
+                patch.object(md, 'send_fresh_dashboard', return_value={'sent': True}) as sf:
+            md.send_fresh_matching_dashboard(MagicMock(), '수지역')
+            self.assertEqual([c.args[2] for c in sf.call_args_list], ['-100NEW', '-1002663285433'])
+            sf.reset_mock()
+            md.send_fresh_matching_dashboard(MagicMock(), '3')
+            self.assertEqual(len(sf.call_args_list), 1)  # 지역 판은 그대로 한 방

@@ -25,6 +25,13 @@ _RESCHEDULE_RESULTS = ('DELAY', 'SECOND_MEET')
 # 2026-09-27 사용자 요청. 크론 순회(list_prospect_chat_team_ids)는 코드 변경
 # 없이 이 TEAM_ID도 그대로 돌게 됨 — matchingChatId만 있으면 되는 구조라서.
 _ALL_REGIONS_TEAM_ID = '수지역'
+# 수지역 판을 함께 받는 방 — 2026-11-27 연결 창에서 [대학] 이멀전시 또치섬으로 바꾼 뒤에도 이전 방에 계속(사용자 요청).
+# 방마다 직전 메시지 id를 따로 둠(lastMatchingMsgId_<방>) — sprout_board.EXTRA_CHAT_IDS와 같은 방식
+_ALL_REGIONS_EXTRA_CHAT_IDS = ('-1002663285433',)
+
+
+def _extra_chats(team_id, main_chat_id):
+    return [c for c in _ALL_REGIONS_EXTRA_CHAT_IDS if str(c) != str(main_chat_id)] if team_id == _ALL_REGIONS_TEAM_ID else []
 
 
 def _fmt_md(date_str):
@@ -206,6 +213,15 @@ def refresh_matching_dashboard(client, team_id, allow_create=True):
     text = _build_text(team_id, rows)
     reply_markup = _dashboard_reply_markup()
 
+    for extra in _extra_chats(team_id, chat_id):  # 함께 받는 방은 기존 메시지만 고침(새로 올리는 건 정각 발송)
+        extra_msg_id = cfg.get(f'lastMatchingMsgId_{extra}')
+        if extra_msg_id:
+            try:
+                tel_router_client.enqueue('editMessageText', {'chat_id': extra, 'message_id': extra_msg_id, 'text': text,
+                                                              'parse_mode': 'HTML', 'reply_markup': reply_markup})
+            except Exception:
+                logger.warning('[matching_dashboard] extra chat edit failed', exc_info=True)
+
     previous_msg_id = cfg.get('lastMatchingMsgId')
     if previous_msg_id:
         try:
@@ -254,10 +270,14 @@ def send_fresh_matching_dashboard(client, team_id):
     rows = _fetch_rows(client, team_id)
     text = _build_text(team_id, rows)
 
-    return send_fresh_dashboard(
+    result = send_fresh_dashboard(
         client, team_id, chat_id, text, _dashboard_reply_markup(), cfg,
         'lastMatchingMsgId', 'lastMatchingMsgDate', 'matching_dashboard',
     )
+    for extra in _extra_chats(team_id, chat_id):
+        send_fresh_dashboard(client, team_id, extra, text, _dashboard_reply_markup(), cfg,
+                             f'lastMatchingMsgId_{extra}', f'lastMatchingMsgDate_{extra}', 'matching_dashboard')
+    return result
 
 
 def refresh_matching_dashboard_for_sarang(client, sarang_id):
