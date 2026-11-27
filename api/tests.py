@@ -566,6 +566,18 @@ class MatchingBoardTests(SimpleTestCase):
         rows[2]['mt_date'] = '2026-11-30'
         self.assertNotIn('김철수', _build_text('수지역', rows).split('<blockquote')[0])
 
+    @patch('api.telegram.matching_dashboard.timezone.localdate')
+    def test_undated_result_uses_next_date(self, today):
+        # 1차 날짜가 비고 결과(2차만남)만 난 건 — 다음 시도 날짜로 판단해 '날짜 미정'에 계속 남지 않게(2026-11-28)
+        import datetime
+        from api.telegram.matching_dashboard import _build_text
+        today.return_value = datetime.date(2026, 11, 28)
+        rows = [self._row('A', 1, None, 'SECOND_MEET', '홍길동'), self._row('A', 2, '2026-11-27', 'DROPOUT', '홍길동')]
+        self.assertNotIn('날짜 미정', _build_text('수지역', rows))  # 지난 날짜라 수지역 판에선 바로 빠짐
+        self.assertIn('날짜 미정', _build_text('1', rows))  # 지역 판은 2일 유예
+        today.return_value = datetime.date(2026, 11, 30)
+        self.assertNotIn('날짜 미정', _build_text('1', rows))
+
 
 class MatchingCronSplitTests(SimpleTestCase):
     """매칭현황판 크론 payload로 방 나누기 — 지역판 매시간, 수지역판 3시간(2026-11-25)"""

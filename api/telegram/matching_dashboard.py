@@ -137,10 +137,12 @@ def _build_text(team_id, rows):
             prev = hist[i - 1] if i > 0 else None
             # 날짜 미정인데 결과 난 시도(밀림 뒤 날짜 없이 취소 등)는 밀리기 전 시도의 날짜로 판단 —
             # 날짜가 없어 이 규칙이 안 걸려서 30일 내내 남아 있었음(2026-11-15 사용자 결정)
-            gone_date = r['mt_date'] or (prev and prev['mt_date'])
+            # 앞 시도도 날짜가 없으면 다음 시도 날짜로(1차 날짜가 비고 2차로 넘어간 건이 계속 남아 있어서, 2026-11-28)
+            gone_date = r['mt_date'] or (prev and prev['mt_date']) or (r['result'] and nxt and nxt['mt_date'])
             if r['result'] and gone_date and datetime.date.fromisoformat(gone_date) < two_days_ago:
                 continue
-            if is_all and r['mt_date'] and not (window_start <= datetime.date.fromisoformat(r['mt_date']) <= window_end):
+            show_date = r['mt_date'] or (gone_date if r['result'] else None)
+            if is_all and show_date and not (window_start <= datetime.date.fromisoformat(show_date) <= window_end):
                 continue
             # 2차 이상 차수면 ✌️ — 2차에서 밀려 같은 차수로 다시 잡힌 건도 포함
             is_2cha = int(r['match_degree'] or 1) >= 2  # 2차에서 밀린 건(같은 차수 다음 시도)도 2차라 ✌️
