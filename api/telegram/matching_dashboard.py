@@ -28,6 +28,8 @@ _ALL_REGIONS_TEAM_ID = '수지역'
 # 수지역 판을 함께 받는 방 — 2026-11-27 연결 창에서 [대학] 이멀전시 또치섬으로 바꾼 뒤에도 이전 방에 계속(사용자 요청).
 # 방마다 직전 메시지 id를 따로 둠(lastMatchingMsgId_<방>) — sprout_board.EXTRA_CHAT_IDS와 같은 방식
 _ALL_REGIONS_EXTRA_CHAT_IDS = ('-1002663285433',)
+# 이 방은 새 판이 올라오면 이전 고정을 풀고 새 판을 고정(2026-11-28)
+_PIN_CHAT_IDS = ('-1002663285433',)
 
 
 def _extra_chats(team_id, main_chat_id):
@@ -280,9 +282,21 @@ def send_fresh_matching_dashboard(client, team_id):
         'lastMatchingMsgId', 'lastMatchingMsgDate', 'matching_dashboard',
     )
     for extra in _extra_chats(team_id, chat_id):
-        send_fresh_dashboard(client, team_id, extra, text, _dashboard_reply_markup(), cfg,
-                             f'lastMatchingMsgId_{extra}', f'lastMatchingMsgDate_{extra}', 'matching_dashboard')
+        res = send_fresh_dashboard(client, team_id, extra, text, _dashboard_reply_markup(), cfg,
+                                   f'lastMatchingMsgId_{extra}', f'lastMatchingMsgDate_{extra}', 'matching_dashboard')
+        if extra in _PIN_CHAT_IDS and res.get('newMessageId'):
+            _repin(extra, cfg.get(f'lastMatchingMsgId_{extra}'), res['newMessageId'])
     return result
+
+
+def _repin(chat_id, old_msg_id, new_msg_id):
+    """이전 현황판 고정을 풀고 새 현황판을 조용히 고정 — 전날 판은 지우지 않고 남기므로 고정만 따로 풂."""
+    try:
+        if old_msg_id:
+            tel_router_client.enqueue('unpinChatMessage', {'chat_id': chat_id, 'message_id': old_msg_id})
+        tel_router_client.enqueue('pinChatMessage', {'chat_id': chat_id, 'message_id': new_msg_id, 'disable_notification': True})
+    except Exception:
+        logger.warning('[matching_dashboard] repin failed', exc_info=True)
 
 
 def refresh_matching_dashboard_for_sarang(client, sarang_id):

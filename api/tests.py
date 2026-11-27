@@ -660,6 +660,17 @@ class MatchingExtraChatTests(SimpleTestCase):
             md.send_fresh_matching_dashboard(MagicMock(), '3')
             self.assertEqual(len(sf.call_args_list), 1)  # 지역 판은 그대로 한 방
 
+    def test_previous_chat_repins_new_board(self):
+        from unittest.mock import MagicMock, patch
+        from api.telegram import matching_dashboard as md
+        cfg = {'matchingChatId': '-100NEW', 'lastMatchingMsgId_-1002663285433': 10}
+        with patch.object(md, 'load_team_config', return_value=cfg), patch.object(md, '_fetch_rows', return_value=[]), \
+                patch.object(md, 'send_fresh_dashboard', return_value={'sent': True, 'newMessageId': 11}), \
+                patch.object(md.tel_router_client, 'enqueue') as enq:
+            md.send_fresh_matching_dashboard(MagicMock(), '수지역')
+        self.assertEqual([(c.args[0], c.args[1]['chat_id'], c.args[1]['message_id']) for c in enq.call_args_list],
+                         [('unpinChatMessage', '-1002663285433', 10), ('pinChatMessage', '-1002663285433', 11)])
+
 
 class TeacherUrgentSendTests(SimpleTestCase):
     def test_posts_card_once_then_list_with_links(self):
