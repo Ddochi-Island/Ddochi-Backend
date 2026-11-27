@@ -1,5 +1,7 @@
 """cronInternal.js 포팅 대상 — cron_internal 라우트 스텁 (구조만, 로직은 미구현)."""
 import json
+import logging
+import threading
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -13,6 +15,8 @@ from api.telegram.team_config import load_all_team_configs
 from api.telegram.shed_union_dashboards import send_fresh_shed_sched, send_fresh_shed_tm, send_fresh_shed_unified
 from api.telegram.team_config import cron_job_enabled, list_prospect_chat_team_ids, list_stats_chat_team_ids, load_team_config
 from api.telegram.team_stats import send_fresh_team_stats
+
+logger = logging.getLogger('api.views.cron_internal')
 
 
 def _send_shed_job(send_fn, group, handler):
@@ -378,7 +382,16 @@ def send_teacher_urgent_view(request, *args, **kwargs):
     if not check_internal_auth(request):
         return JsonResponse({'error': 'unauthorized'}, status=401)
     from api.telegram.teacher_urgent import send_teacher_urgent
-    return JsonResponse({'success': True, 'result': send_teacher_urgent(DataRouterClient())})
+
+    # 카드를 3초 간격으로 보내 오래 걸림(처음엔 수십 장) — gunicorn 30초·크론 45초 제한에 안 걸리게 뒤에서 돌림
+    def run():
+        try:
+            send_teacher_urgent(DataRouterClient())
+        except Exception:
+            logger.exception('[teacher_urgent] failed')
+
+    threading.Thread(target=run, daemon=True).start()
+    return JsonResponse({'success': True, 'result': {'started': True}})
 
 
 @csrf_exempt

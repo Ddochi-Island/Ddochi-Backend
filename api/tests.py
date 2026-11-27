@@ -669,7 +669,7 @@ class TeacherUrgentSendTests(SimpleTestCase):
                'mt_time': '16:00', 'match_location': '사당', 'revolution': '0'}
         cfg = {'teacherUrgentChatId': '-1003763878670', 'teacherUrgentCards': {'GONE': 1}}
         with patch.object(tu, 'load_team_config', return_value=cfg), patch.object(tu, 'fetch_rows', return_value=[row]), \
-                patch.object(tu, 'patch_team_config') as ptc, patch.object(tu, 'send_fresh_dashboard', return_value={'sent': True}) as sf, \
+                patch.object(tu, 'patch_team_config') as ptc, patch.object(tu, 'send_fresh_dashboard', return_value={'sent': True}) as sf, patch.object(tu.time, 'sleep'), \
                 patch.object(tu.tel_router_client, 'enqueue', return_value={'ok': True, 'result': {'message_id': 77}}) as enq, \
                 patch('api.telegram.habjaeyang._fetch', return_value={'x': 1}), patch('api.telegram.habjaeyang._build_text', return_value='카드'):
             tu.send_teacher_urgent(MagicMock())

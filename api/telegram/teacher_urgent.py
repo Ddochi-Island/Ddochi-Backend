@@ -1,5 +1,6 @@
 # 교사 급구 — 오늘~3일 뒤 매칭 중 교사가 안 정해진 건을 "N지역 성별 N살 N시 장소 MBTI" 목록으로(2026-11-26)
 import logging
+import time
 
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import send_fresh_dashboard
@@ -11,6 +12,7 @@ TEAM_ID = '수지역'  # 교사 급구 방은 수지역 설정의 teacherUrgentC
 
 # 인도자가 이 직책이면 줄 앞에 🔫 (혁명특전대 — 사용자가 '혁명반'이라 부름)
 _REVOLUTION_CODES = ('disp_special_forces', 'disp_special_forces_lead')
+_CARD_GAP_S = 3.2
 
 
 def fetch_rows(client):
@@ -74,15 +76,20 @@ def send_teacher_urgent(client):
         return {'skipped': True, 'reason': 'no_chat_id'}
     rows = fetch_rows(client)
     posted = {k: v for k, v in (cfg.get('teacherUrgentCards') or {}).items()}  # sarang_id → 카드 메시지 id
+    sent_any = False
     for sid in dict.fromkeys(r['sarang_id'] for r in rows):
         if sid in posted:
             continue
         row = card_row(client, sid)
         if not row:
             continue
+        # 그룹은 분당 20건 제한 — 몰아 보내면 429로 카드·목록이 빠져서(2026-11-28) 3초 간격으로
+        if sent_any:
+            time.sleep(_CARD_GAP_S)
+        sent_any = True
         try:
             res = tel_router_client.enqueue('sendMessage', {'chat_id': chat_id, 'text': card_text(row), 'parse_mode': 'HTML'},
-                                            await_result=True)
+                                            await_result=True, timeout=60)
         except Exception:
             logger.warning('[teacher_urgent] card send failed', exc_info=True)
             continue
@@ -92,5 +99,7 @@ def send_teacher_urgent(client):
     keep = {sid: posted[sid] for sid in dict.fromkeys(r['sarang_id'] for r in rows) if sid in posted}
     patch_team_config(client, TEAM_ID, {'teacherUrgentCards': keep}, 'system')
     text = build_text(rows, {sid: _msg_link(chat_id, mid) for sid, mid in keep.items()})
+    if sent_any:
+        time.sleep(_CARD_GAP_S)
     return send_fresh_dashboard(client, TEAM_ID, chat_id, text, None, cfg, 'lastTeacherUrgentMsgId', 'lastTeacherUrgentMsgDate',
                                 'teacher_urgent', no_link_preview=True)
