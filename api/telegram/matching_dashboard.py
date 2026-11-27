@@ -304,4 +304,9 @@ def refresh_matching_dashboard_for_sarang(client, sarang_id):
         refresh_matching_dashboard(client, _ALL_REGIONS_TEAM_ID, allow_create=False)
     except Exception:
         logger.warning('[matching_dashboard] 수지역 refresh failed', exc_info=True)
+    try:  # 교사 급구 목록도 — 교사가 정해지면 바로 빠지게(2026-11-28)
+        from api.telegram.teacher_urgent import refresh_teacher_urgent
+        refresh_teacher_urgent(client)
+    except Exception:
+        logger.warning('[matching_dashboard] 교사 급구 refresh failed', exc_info=True)
     return result

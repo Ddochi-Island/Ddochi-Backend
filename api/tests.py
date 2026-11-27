@@ -677,6 +677,22 @@ class TeacherUrgentSendTests(SimpleTestCase):
         self.assertEqual(ptc.call_args[0][2], {'teacherUrgentCards': {'A': 77}})  # 목록에서 빠진 GONE은 정리
         self.assertIn('https://t.me/c/3763878670/77', sf.call_args[0][3])
 
+    def test_refresh_edits_today_list(self):
+        from unittest.mock import MagicMock, patch
+        from django.utils import timezone
+        from api.telegram import teacher_urgent as tu
+        cfg = {'teacherUrgentChatId': '-1003763878670', 'lastTeacherUrgentMsgId': 9, 'teacherUrgentCards': {},
+               'lastTeacherUrgentMsgDate': timezone.localdate().isoformat()}
+        with patch.object(tu, 'load_team_config', return_value=cfg), patch.object(tu, 'fetch_rows', return_value=[]), \
+                patch.object(tu.tel_router_client, 'enqueue') as enq:
+            tu.refresh_teacher_urgent(MagicMock())
+            self.assertEqual(enq.call_args[0][0], 'editMessageText')
+            self.assertIn('교사가 필요한 매칭이 없어요', enq.call_args[0][1]['text'])
+            cfg['lastTeacherUrgentMsgDate'] = '2000-01-01'  # 전날 목록은 그대로 둠
+            enq.reset_mock()
+            tu.refresh_teacher_urgent(MagicMock())
+            enq.assert_not_called()
+
     def test_list_send_omits_null_markup(self):
         from unittest.mock import MagicMock, patch
         from api.telegram import dashboard_send as ds

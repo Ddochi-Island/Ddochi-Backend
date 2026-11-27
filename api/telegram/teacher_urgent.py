@@ -2,6 +2,8 @@
 import logging
 import time
 
+from django.utils import timezone
+
 from api.telegram import tel_router_client
 from api.telegram.dashboard_send import send_fresh_dashboard
 from api.telegram.matching_dashboard import _fmt_md
@@ -103,3 +105,16 @@ def send_teacher_urgent(client):
         time.sleep(_CARD_GAP_S)
     return send_fresh_dashboard(client, TEAM_ID, chat_id, text, None, cfg, 'lastTeacherUrgentMsgId', 'lastTeacherUrgentMsgDate',
                                 'teacher_urgent', no_link_preview=True)
+
+
+def refresh_teacher_urgent(client):
+    """교사·날짜·결과 입력 때 — 오늘 올린 목록을 그 자리에서 고침(교사 정해진 사람은 바로 빠짐, 2026-11-28).
+    카드는 새로 올리지 않음(새로 들어온 사람은 링크 없이 줄만, 다음 정각 발송 때 카드)."""
+    cfg = load_team_config(client, TEAM_ID)
+    chat_id, msg_id = cfg.get('teacherUrgentChatId'), cfg.get('lastTeacherUrgentMsgId')
+    if not chat_id or not msg_id or cfg.get('lastTeacherUrgentMsgDate') != timezone.localdate().isoformat():
+        return {'skipped': True}
+    cards = cfg.get('teacherUrgentCards') or {}
+    text = build_text(fetch_rows(client), {sid: _msg_link(chat_id, mid) for sid, mid in cards.items()})
+    return tel_router_client.enqueue('editMessageText', {'chat_id': chat_id, 'message_id': msg_id, 'text': text,
+                                                         'parse_mode': 'HTML', 'link_preview_options': {'is_disabled': True}})
