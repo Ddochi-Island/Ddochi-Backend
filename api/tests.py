@@ -676,3 +676,11 @@ class TeacherUrgentSendTests(SimpleTestCase):
         self.assertEqual(enq.call_count, 1)  # 카드 한 장
         self.assertEqual(ptc.call_args[0][2], {'teacherUrgentCards': {'A': 77}})  # 목록에서 빠진 GONE은 정리
         self.assertIn('https://t.me/c/3763878670/77', sf.call_args[0][3])
+
+    def test_list_send_omits_null_markup(self):
+        from unittest.mock import MagicMock, patch
+        from api.telegram import dashboard_send as ds
+        with patch.object(ds.tel_router_client, 'enqueue', return_value={'ok': True, 'result': {'message_id': 5}}) as enq, \
+                patch.object(ds, 'patch_team_config'):
+            ds.send_fresh_dashboard(MagicMock(), '수지역', '-100', '목록', None, {}, 'a', 'b', 't', no_link_preview=True)
+        self.assertNotIn('reply_markup', enq.call_args[0][1])

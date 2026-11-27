@@ -33,6 +33,8 @@ def send_fresh_dashboard(client, region_code, chat_id, text, reply_markup, cfg, 
         method, payload = 'sendRichMessage', {'chat_id': chat_id, 'rich_message': {'blocks': rich_blocks}, 'reply_markup': reply_markup}
     else:
         method, payload = 'sendMessage', {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': reply_markup}
+        if reply_markup is None:  # null로 보내면 텔레그램이 버튼 JSON을 못 읽어 거절(교사 급구 목록이 안 올라가던 원인, 2026-11-28)
+            payload.pop('reply_markup')
         if no_link_preview:  # 메시지 링크가 여럿인 목록 — 첫 링크 미리보기가 크게 붙지 않게
             payload['link_preview_options'] = {'is_disabled': True}
     try:
