@@ -563,6 +563,7 @@ class MatchingBoardTests(SimpleTestCase):
         self.assertIn('🤔 2차 언제 만나시나요~?\n<code>홍길동|인도|</code>', text)
         self.assertNotIn('날짜 미정', text)
         self.assertIn('김철수', _build_text('수지역', rows))  # 4일 뒤(11/29)까지 보임
+        self.assertIn('\n1지역|17:00|김철수|인도||\n', _build_text('수지역', rows))  # 수지역 판은 <code> 없이
         rows[2]['mt_date'] = '2026-11-30'
         self.assertNotIn('김철수', _build_text('수지역', rows).split('<blockquote')[0])
 

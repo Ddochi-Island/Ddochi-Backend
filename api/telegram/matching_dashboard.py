@@ -171,7 +171,9 @@ def _build_text(team_id, rows):
             for it in items:
                 # 전체(수지역) 보드만 지역 태그를 맨 앞에 붙임 — 개별 지역 보드는 기존 그대로.
                 region_prefix = f"{it['region']}지역|" if is_all else ''
-                lines.append(f"<code>{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}</code>")
+                line = f"{region_prefix}{it['time']}|{it['name']}|{it['guide']}|{it['teacher']}|{it['outcome']}"
+                # 수지역 판은 칸이 많아 고정폭(<code>)이면 폰에서 두 줄로 넘어가서 일반 글씨로(2026-11-28)
+                lines.append(line if is_all else f"<code>{line}</code>")
             lines.append('')
     if ask:
         lines.append('🤔 2차 언제 만나시나요~?')
