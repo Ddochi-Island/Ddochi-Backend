@@ -685,7 +685,7 @@ class TeacherUrgentSendTests(SimpleTestCase):
                 patch('api.telegram.habjaeyang._fetch', return_value={'x': 1}), patch('api.telegram.habjaeyang._build_text', return_value='카드'):
             tu.send_teacher_urgent(MagicMock())
         self.assertEqual(enq.call_count, 1)  # 카드 한 장
-        self.assertEqual(ptc.call_args[0][2], {'teacherUrgentCards': {'A': 77}})  # 목록에서 빠진 GONE은 정리
+        self.assertEqual(ptc.call_args[0][2], {'teacherUrgentCards': {'GONE': None, 'A': 77}, 'teacherUrgentCardErrors': []})  # 빠진 GONE은 null로 지움
         self.assertIn('https://t.me/c/3763878670/77', sf.call_args[0][3])
 
     def test_refresh_edits_today_list(self):

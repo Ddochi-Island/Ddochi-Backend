@@ -78,7 +78,7 @@ def send_teacher_urgent(client):
         return {'skipped': True, 'reason': 'no_chat_id'}
     rows = fetch_rows(client)
     posted = {k: v for k, v in (cfg.get('teacherUrgentCards') or {}).items()}  # sarang_id → 카드 메시지 id
-    sent_any = False
+    sent_any, errors = False, []  # 카드 실패 사유 — 서버 로그를 못 봐서 설정에 남겨 확인(2026-11-28)
     for sid in dict.fromkeys(r['sarang_id'] for r in rows):
         if sid in posted:
             continue
@@ -92,14 +92,19 @@ def send_teacher_urgent(client):
         try:
             res = tel_router_client.enqueue('sendMessage', {'chat_id': chat_id, 'text': card_text(row), 'parse_mode': 'HTML'},
                                             await_result=True, timeout=60)
-        except Exception:
+        except Exception as e:
             logger.warning('[teacher_urgent] card send failed', exc_info=True)
+            errors.append(f'{sid[-8:]} {type(e).__name__}: {e}'[:200])
             continue
         if res.get('ok'):
             posted[sid] = res['result']['message_id']
-    # 지금 목록에 있는 사람만 남김 — 교사가 정해져 빠졌다가 다시 들어오면 카드를 새로 올림
+        else:
+            errors.append(f"{sid[-8:]} {res.get('error_code')} {res.get('description')}"[:200])
+    # 지금 목록에 있는 사람만 남김 — 교사가 정해져 빠졌다가 다시 들어오면 카드를 새로 올림.
+    # JSON_MERGEPATCH는 객체를 병합하므로 빠진 사람은 null로 보내야 지워짐
     keep = {sid: posted[sid] for sid in dict.fromkeys(r['sarang_id'] for r in rows) if sid in posted}
-    patch_team_config(client, TEAM_ID, {'teacherUrgentCards': keep}, 'system')
+    patch_team_config(client, TEAM_ID, {'teacherUrgentCards': {**{k: None for k in posted if k not in keep}, **keep},
+                                        'teacherUrgentCardErrors': errors}, 'system')
     text = build_text(rows, {sid: _msg_link(chat_id, mid) for sid, mid in keep.items()})
     if sent_any:
         time.sleep(_CARD_GAP_S)
