@@ -699,6 +699,16 @@ class TeacherUrgentSendTests(SimpleTestCase):
             tu.refresh_teacher_urgent(MagicMock())
             self.assertEqual(enq.call_args[0][0], 'editMessageText')
             self.assertIn('교사가 필요한 매칭이 없어요', enq.call_args[0][1]['text'])
+            # 새로 들어온 사람은 카드부터 올리고 링크를 단 목록으로 고침
+            row = {'sarang_id': 'B', 'region': '2', 'gender': '여', 'age': '19', 'mbti': 'ESFP', 'mt_date': '2026-11-29',
+                   'mt_time': '18:00', 'match_location': '사당', 'revolution': '0'}
+            enq.reset_mock()
+            enq.return_value = {'ok': True, 'result': {'message_id': 88}}
+            with patch.object(tu, 'fetch_rows', return_value=[row]), patch.object(tu, 'patch_team_config'), \
+                    patch('api.telegram.habjaeyang._fetch', return_value={'x': 1}), patch('api.telegram.habjaeyang._build_text', return_value='카드'):
+                tu.refresh_teacher_urgent(MagicMock())
+            self.assertEqual([c.args[0] for c in enq.call_args_list], ['sendMessage', 'editMessageText'])
+            self.assertIn('https://t.me/c/3763878670/88', enq.call_args[0][1]['text'])
             cfg['lastTeacherUrgentMsgDate'] = '2000-01-01'  # 전날 목록은 그대로 둠
             enq.reset_mock()
             tu.refresh_teacher_urgent(MagicMock())

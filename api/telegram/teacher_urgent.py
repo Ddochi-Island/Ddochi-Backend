@@ -68,16 +68,10 @@ def _msg_link(chat_id, msg_id):
     return f"https://t.me/c/{str(chat_id).removeprefix('-100')}/{msg_id}"
 
 
-def send_teacher_urgent(client):
-    """하루 3번(09·13·18시) — 목록에 있는 사람의 합재양 카드를 급구 방에 (처음 한 번만) 올리고, 카드 링크를 단 목록을 새 메시지로."""
+def _post_cards(client, chat_id, rows, posted):
+    """카드가 아직 없는 사람의 합재양 카드를 올림 — posted(sarang_id → 메시지 id)를 채우고 (실패 사유, 보낸 게 있는지) 반환."""
     from api.telegram.habjaeyang import _build_text as card_text, _fetch as card_row  # 순환 import 회피
 
-    cfg = load_team_config(client, TEAM_ID)
-    chat_id = cfg.get('teacherUrgentChatId')
-    if not chat_id:
-        return {'skipped': True, 'reason': 'no_chat_id'}
-    rows = fetch_rows(client)
-    posted = {k: v for k, v in (cfg.get('teacherUrgentCards') or {}).items()}  # sarang_id → 카드 메시지 id
     sent_any, errors = False, []  # 카드 실패 사유 — 서버 로그를 못 봐서 설정에 남겨 확인(2026-11-28)
     for sid in dict.fromkeys(r['sarang_id'] for r in rows):
         if sid in posted:
@@ -100,11 +94,28 @@ def send_teacher_urgent(client):
             posted[sid] = res['result']['message_id']
         else:
             errors.append(f"{sid[-8:]} {res.get('error_code')} {res.get('description')}"[:200])
-    # 지금 목록에 있는 사람만 남김 — 교사가 정해져 빠졌다가 다시 들어오면 카드를 새로 올림.
-    # JSON_MERGEPATCH는 객체를 병합하므로 빠진 사람은 null로 보내야 지워짐
+    return errors, sent_any
+
+
+def _save_cards(client, rows, posted, errors):
+    """지금 목록에 있는 사람만 남김 — 교사가 정해져 빠졌다가 다시 들어오면 카드를 새로 올림.
+    JSON_MERGEPATCH는 객체를 병합하므로 빠진 사람은 null로 보내야 지워짐."""
     keep = {sid: posted[sid] for sid in dict.fromkeys(r['sarang_id'] for r in rows) if sid in posted}
     patch_team_config(client, TEAM_ID, {'teacherUrgentCards': {**{k: None for k in posted if k not in keep}, **keep},
                                         'teacherUrgentCardErrors': errors}, 'system')
+    return keep
+
+
+def send_teacher_urgent(client):
+    """하루 3번(09·13·18시) — 목록에 있는 사람의 합재양 카드를 급구 방에 (처음 한 번만) 올리고, 카드 링크를 단 목록을 새 메시지로."""
+    cfg = load_team_config(client, TEAM_ID)
+    chat_id = cfg.get('teacherUrgentChatId')
+    if not chat_id:
+        return {'skipped': True, 'reason': 'no_chat_id'}
+    rows = fetch_rows(client)
+    posted = dict(cfg.get('teacherUrgentCards') or {})  # sarang_id → 카드 메시지 id
+    errors, sent_any = _post_cards(client, chat_id, rows, posted)
+    keep = _save_cards(client, rows, posted, errors)
     text = build_text(rows, {sid: _msg_link(chat_id, mid) for sid, mid in keep.items()})
     if sent_any:
         time.sleep(_CARD_GAP_S)
@@ -114,12 +125,15 @@ def send_teacher_urgent(client):
 
 def refresh_teacher_urgent(client):
     """교사·날짜·결과 입력 때 — 오늘 올린 목록을 그 자리에서 고침(교사 정해진 사람은 바로 빠짐, 2026-11-28).
-    카드는 새로 올리지 않음(새로 들어온 사람은 링크 없이 줄만, 다음 정각 발송 때 카드)."""
+    새로 들어온 사람은 카드도 바로 올려 링크를 닮."""
     cfg = load_team_config(client, TEAM_ID)
     chat_id, msg_id = cfg.get('teacherUrgentChatId'), cfg.get('lastTeacherUrgentMsgId')
     if not chat_id or not msg_id or cfg.get('lastTeacherUrgentMsgDate') != timezone.localdate().isoformat():
         return {'skipped': True}
-    cards = cfg.get('teacherUrgentCards') or {}
-    text = build_text(fetch_rows(client), {sid: _msg_link(chat_id, mid) for sid, mid in cards.items()})
+    rows = fetch_rows(client)
+    posted = dict(cfg.get('teacherUrgentCards') or {})
+    errors, sent_any = _post_cards(client, chat_id, rows, posted)
+    cards = _save_cards(client, rows, posted, errors) if sent_any else posted
+    text = build_text(rows, {sid: _msg_link(chat_id, mid) for sid, mid in cards.items()})
     return tel_router_client.enqueue('editMessageText', {'chat_id': chat_id, 'message_id': msg_id, 'text': text,
                                                          'parse_mode': 'HTML', 'link_preview_options': {'is_disabled': True}})
